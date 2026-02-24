@@ -1,4 +1,4 @@
-module bv108-backend
+module bv108-consumables-management-backend
 
 go 1.21
 

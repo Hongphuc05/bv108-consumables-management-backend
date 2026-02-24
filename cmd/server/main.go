@@ -6,10 +6,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"bv108-backend/config"
-	"bv108-backend/internal/database"
-	"bv108-backend/internal/handlers"
-	"bv108-backend/internal/models"
+	"bv108-consumables-management-backend/config"
+	"bv108-consumables-management-backend/internal/database"
+	"bv108-consumables-management-backend/internal/handlers"
+	"bv108-consumables-management-backend/internal/models"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"

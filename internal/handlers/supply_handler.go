@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"bv108-backend/internal/models"
+	"bv108-consumables-management-backend/internal/models"
 
 	"github.com/gin-gonic/gin"
 )

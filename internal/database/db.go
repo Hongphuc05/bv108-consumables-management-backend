@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"bv108-backend/config"
+	"bv108-consumables-management-backend/config"
 
 	_ "github.com/go-sql-driver/mysql"
 )
