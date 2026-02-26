@@ -36,6 +36,10 @@ func main() {
 	userRepo := models.NewUserRepository(database.DB)
 	authHandler := handlers.NewAuthHandler(userRepo, config.AppConfig.JWTSecret, config.AppConfig.JWTExpiresHours)
 
+	hoaDonRepo := models.NewHoaDonRepository(database.DB)
+	hoaDonHandler := handlers.NewHoaDonHandler(hoaDonRepo)
+	refreshHandler := handlers.NewRefreshHandler(hoaDonRepo)
+
 	// Initialize Gin router
 	router := gin.Default()
 
@@ -70,6 +74,14 @@ func main() {
 			supplies.GET("/group", supplyHandler.GetSuppliesByGroup)      // GET /api/supplies/group?groupName=xxx
 			supplies.GET("/low-stock", supplyHandler.GetLowStockSupplies) // GET /api/supplies/low-stock?threshold=20
 			supplies.GET("/:id", supplyHandler.GetSupplyByID)             // GET /api/supplies/:id
+		}
+
+		hoaDon := api.Group("/hoa-don")
+		{
+			hoaDon.GET("", hoaDonHandler.GetAllHoaDon)              // GET /api/hoa-don?limit=100&offset=0
+			hoaDon.GET("/search", hoaDonHandler.SearchHoaDon)       // GET /api/hoa-don/search?q=keyword
+			hoaDon.GET("/:id", hoaDonHandler.GetHoaDonByID)         // GET /api/hoa-don/:id
+			hoaDon.POST("/refresh", refreshHandler.RefreshInvoices) // POST /api/hoa-don/refresh
 		}
 	}
 
