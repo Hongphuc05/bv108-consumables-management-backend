@@ -32,5 +32,5 @@ go.work
 Thumbs.db
 
 
-__pycache__
-invoices_export.csv
+__pycache__/
+*.csv
