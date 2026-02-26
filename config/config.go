@@ -4,19 +4,22 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	DBHost      string
-	DBPort      string
-	DBUser      string
-	DBPassword  string
-	DBName      string
-	ServerPort  string
-	GinMode     string
-	FrontendURL string
+	DBHost          string
+	DBPort          string
+	DBUser          string
+	DBPassword      string
+	DBName          string
+	ServerPort      string
+	GinMode         string
+	FrontendURL     string
+	JWTSecret       string
+	JWTExpiresHours int
 }
 
 var AppConfig *Config
@@ -29,14 +32,16 @@ func LoadConfig() error {
 	}
 
 	AppConfig = &Config{
-		DBHost:      getEnv("DB_HOST", "localhost"),
-		DBPort:      getEnv("DB_PORT", "3306"),
-		DBUser:      getEnv("DB_USER", "root"),
-		DBPassword:  getEnv("DB_PASSWORD", ""),
-		DBName:      getEnv("DB_NAME", "hospital_db"),
-		ServerPort:  getEnv("SERVER_PORT", "8080"),
-		GinMode:     getEnv("GIN_MODE", "debug"),
-		FrontendURL: getEnv("FRONTEND_URL", "http://localhost:5173"),
+		DBHost:          getEnv("DB_HOST", "localhost"),
+		DBPort:          getEnv("DB_PORT", "3306"),
+		DBUser:          getEnv("DB_USER", "root"),
+		DBPassword:      getEnv("DB_PASSWORD", ""),
+		DBName:          getEnv("DB_NAME", "hospital_db"),
+		ServerPort:      getEnv("SERVER_PORT", "8080"),
+		GinMode:         getEnv("GIN_MODE", "debug"),
+		FrontendURL:     getEnv("FRONTEND_URL", "http://localhost:5173"),
+		JWTSecret:       getEnv("JWT_SECRET", "change-this-secret"),
+		JWTExpiresHours: getEnvAsInt("JWT_EXPIRES_HOURS", 8),
 	}
 
 	return nil
@@ -58,4 +63,18 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func getEnvAsInt(key string, defaultValue int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+
+	parsedValue, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultValue
+	}
+
+	return parsedValue
 }
