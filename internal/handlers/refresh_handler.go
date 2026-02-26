@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 
@@ -19,8 +20,22 @@ func NewRefreshHandler(repo interface{ GetCount() (int, error) }) *RefreshHandle
 }
 
 func (h *RefreshHandler) RefreshInvoices(c *gin.Context) {
-	pythonPath := "C:/Users/User/anaconda3/envs/EnvironmentHP/python.exe"
-	projectRoot := "D:/Projects/bv-108/bv108-consumables-management-backend"
+	// Lấy Python path từ biến môi trường, mặc định là "python" nếu không set
+	pythonPath := os.Getenv("PYTHON_PATH")
+	if pythonPath == "" {
+		pythonPath = "python" // Sử dụng python trong PATH
+	}
+
+	// Lấy thư mục gốc của project từ working directory
+	projectRoot, err := os.Getwd()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to get working directory",
+			"details": err.Error(),
+		})
+		return
+	}
+
 	ubotDir := filepath.Join(projectRoot, "ubot-api")
 
 	// Step 1: Export - Dùng auto_export.py không cần input
