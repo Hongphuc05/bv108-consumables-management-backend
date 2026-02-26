@@ -31,6 +31,37 @@ SERVER_PORT=8080
 GIN_MODE=debug
 
 FRONTEND_URL=http://localhost:5173
+
+JWT_SECRET=YOUR_SECRET_KEY
+JWT_EXPIRES_HOURS=8
+```
+
+### 2.1️⃣ Tạo bảng users thủ công trong MySQL Workbench (ngoài code)
+
+Vì dự án chưa dùng migration, tạo bảng trực tiếp trong MySQL Workbench:
+
+1. Mở MySQL Workbench và chọn schema `hospital_db`
+2. Vào tab SQL Editor và chạy câu lệnh:
+
+```sql
+CREATE TABLE users (
+	id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+	username VARCHAR(100) NOT NULL,
+	email VARCHAR(150) NOT NULL UNIQUE,
+	password_hash VARCHAR(255) NOT NULL,
+	role ENUM('nhan_vien','truong_khoa') NOT NULL,
+	is_active TINYINT(1) NOT NULL DEFAULT 1,
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+	UNIQUE KEY uk_users_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+3. Kiểm tra bảng đã tạo:
+
+```sql
+DESCRIBE users;
+SELECT * FROM users LIMIT 5;
 ```
 
 ### 3️⃣ Cài Đặt Dependencies
@@ -84,6 +115,28 @@ curl "http://localhost:8080/api/supplies/group?groupName=Nhóm A"
 ### Lấy vật tư tồn kho thấp
 ```bash
 curl http://localhost:8080/api/supplies/low-stock?threshold=20
+```
+
+### Đăng ký tài khoản
+```bash
+curl -X POST http://localhost:8080/api/auth/register \
+	-H "Content-Type: application/json" \
+	-d '{"username":"Nguyen Van A","email":"a@bv108.vn","password":"123456","role":"nhan_vien"}'
+```
+
+### Đăng nhập bằng email
+```bash
+curl -X POST http://localhost:8080/api/auth/login \
+	-H "Content-Type: application/json" \
+	-d '{"email":"a@bv108.vn","password":"123456"}'
+```
+
+### Cập nhật hồ sơ tài khoản
+```bash
+curl -X PUT http://localhost:8080/api/auth/profile \
+	-H "Content-Type: application/json" \
+	-H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+	-d '{"username":"Nguyen Van B","email":"b@bv108.vn"}'
 ```
 
 ## ❗ Xử Lý Lỗi Thường Gặp
