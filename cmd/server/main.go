@@ -33,6 +33,8 @@ func main() {
 	// Initialize repository and handler
 	supplyRepo := models.NewSupplyRepository(database.DB)
 	supplyHandler := handlers.NewSupplyHandler(supplyRepo)
+	userRepo := models.NewUserRepository(database.DB)
+	authHandler := handlers.NewAuthHandler(userRepo, config.AppConfig.JWTSecret, config.AppConfig.JWTExpiresHours)
 
 	hoaDonRepo := models.NewHoaDonRepository(database.DB)
 	hoaDonHandler := handlers.NewHoaDonHandler(hoaDonRepo)
@@ -56,6 +58,14 @@ func main() {
 	// API routes
 	api := router.Group("/api")
 	{
+		auth := api.Group("/auth")
+		{
+			auth.POST("/register", authHandler.Register)
+			auth.POST("/login", authHandler.Login)
+			auth.GET("/profile", authHandler.GetProfile)
+			auth.PUT("/profile", authHandler.UpdateProfile)
+		}
+
 		supplies := api.Group("/supplies")
 		{
 			supplies.GET("", supplyHandler.GetAllSupplies)                // GET /api/supplies?page=1&pageSize=20
