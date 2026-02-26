@@ -30,3 +30,7 @@ go.work
 # OS
 .DS_Store
 Thumbs.db
+
+
+__pycache__
+invoices_export.csv
