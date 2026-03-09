@@ -13,6 +13,8 @@ type Supply struct {
 	GroupName    sql.NullString  `json:"groupName"`
 	ID           sql.NullString  `json:"id"`
 	IDX2         sql.NullString  `json:"idx2"`
+	MaHieu       sql.NullString  `json:"maHieu"`
+	SoLuongThau  sql.NullInt32   `json:"soLuongThau"`
 	TypeName     sql.NullString  `json:"typeName"`
 	Name         sql.NullString  `json:"name"`
 	Unit         sql.NullString  `json:"unit"`
@@ -160,7 +162,7 @@ func (r *SupplyRepository) GetAll(page, pageSize int) ([]Supply, int, error) {
 	// Get paginated data
 	query := `
 		SELECT 
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, TYPENAME, NAME, UNIT, QUY_CACH,
+			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, SO_LUONG_THAU, TYPENAME, NAME, UNIT, QUY_CACH,
 			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
 			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
 		FROM supplies
@@ -178,7 +180,7 @@ func (r *SupplyRepository) GetAll(page, pageSize int) ([]Supply, int, error) {
 	for rows.Next() {
 		var s Supply
 		err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2,
+			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu, &s.SoLuongThau,
 			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
 			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
 			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
@@ -198,7 +200,7 @@ func (r *SupplyRepository) GetAll(page, pageSize int) ([]Supply, int, error) {
 func (r *SupplyRepository) GetByID(idx1 int) (*Supply, error) {
 	query := `
 		SELECT 
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, TYPENAME, NAME, UNIT, QUY_CACH,
+			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, SO_LUONG_THAU, TYPENAME, NAME, UNIT, QUY_CACH,
 			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
 			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
 		FROM supplies
@@ -207,7 +209,7 @@ func (r *SupplyRepository) GetByID(idx1 int) (*Supply, error) {
 
 	var s Supply
 	err := r.DB.QueryRow(query, idx1).Scan(
-		&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2,
+		&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu, &s.SoLuongThau,
 		&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
 		&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
 		&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
@@ -241,7 +243,7 @@ func (r *SupplyRepository) SearchByName(keyword string, page, pageSize int) ([]S
 	// Get paginated data
 	query := `
 		SELECT 
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, TYPENAME, NAME, UNIT, QUY_CACH,
+			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, SO_LUONG_THAU, TYPENAME, NAME, UNIT, QUY_CACH,
 			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
 			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
 		FROM supplies
@@ -260,7 +262,7 @@ func (r *SupplyRepository) SearchByName(keyword string, page, pageSize int) ([]S
 	for rows.Next() {
 		var s Supply
 		err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2,
+			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu, &s.SoLuongThau,
 			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
 			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
 			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
@@ -291,7 +293,7 @@ func (r *SupplyRepository) GetByGroup(groupName string, page, pageSize int) ([]S
 	// Get paginated data
 	query := `
 		SELECT 
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, TYPENAME, NAME, UNIT, QUY_CACH,
+			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, SO_LUONG_THAU, TYPENAME, NAME, UNIT, QUY_CACH,
 			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
 			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
 		FROM supplies
@@ -310,7 +312,7 @@ func (r *SupplyRepository) GetByGroup(groupName string, page, pageSize int) ([]S
 	for rows.Next() {
 		var s Supply
 		err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2,
+			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu, &s.SoLuongThau,
 			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
 			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
 			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
@@ -365,7 +367,7 @@ func (r *SupplyRepository) GetLowStock(threshold int, page, pageSize int) ([]Sup
 
 	query := `
 		SELECT 
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, TYPENAME, NAME, UNIT, QUY_CACH,
+			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, SO_LUONG_THAU, TYPENAME, NAME, UNIT, QUY_CACH,
 			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
 			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
 		FROM supplies
@@ -384,7 +386,7 @@ func (r *SupplyRepository) GetLowStock(threshold int, page, pageSize int) ([]Sup
 	for rows.Next() {
 		var s Supply
 		err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2,
+			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu, &s.SoLuongThau,
 			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
 			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
 			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
