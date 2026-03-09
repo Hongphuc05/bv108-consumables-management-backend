@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"bv108-consumables-management-backend/internal/models"
 
@@ -32,6 +33,10 @@ type PaginationResponse struct {
 type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
+}
+
+type CompareRequest struct {
+	MaThuVien []string `json:"maThuVien"`
 }
 
 // GetAllSupplies godoc
@@ -279,6 +284,100 @@ func (h *SupplyHandler) GetLowStockSupplies(c *gin.Context) {
 		PageSize:   pageSize,
 		Total:      total,
 		TotalPages: totalPages,
+	})
+}
+
+// GetCompareCatalog returns paginated rows from so_sanh_vat_tu for selection list.
+func (h *SupplyHandler) GetCompareCatalog(c *gin.Context) {
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	items, total, err := h.repo.GetCompareCatalog(keyword, page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error:   "DATABASE_ERROR",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	totalPages := (total + pageSize - 1) / pageSize
+
+	c.JSON(http.StatusOK, PaginationResponse{
+		Data:       items,
+		Page:       page,
+		PageSize:   pageSize,
+		Total:      total,
+		TotalPages: totalPages,
+	})
+}
+
+// CompareSupplies returns selected comparison rows by ma_thu_vien.
+func (h *SupplyHandler) CompareSupplies(c *gin.Context) {
+	var req CompareRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error:   "INVALID_REQUEST",
+			Message: "Invalid compare payload",
+		})
+		return
+	}
+
+	if len(req.MaThuVien) < 2 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error:   "INVALID_SELECTION",
+			Message: "Vui long chon it nhat 2 vat tu de so sanh",
+		})
+		return
+	}
+
+	if len(req.MaThuVien) > 10 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error:   "INVALID_SELECTION",
+			Message: "Chi duoc so sanh toi da 10 vat tu moi lan",
+		})
+		return
+	}
+
+	unique := make([]string, 0, len(req.MaThuVien))
+	seen := make(map[string]bool)
+	for _, raw := range req.MaThuVien {
+		code := strings.TrimSpace(raw)
+		if code == "" || seen[code] {
+			continue
+		}
+		seen[code] = true
+		unique = append(unique, code)
+	}
+
+	if len(unique) < 2 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error:   "INVALID_SELECTION",
+			Message: "Vui long chon it nhat 2 ma thu vien hop le",
+		})
+		return
+	}
+
+	items, err := h.repo.GetCompareByLibraryCodes(unique)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error:   "DATABASE_ERROR",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  items,
+		"total": len(items),
 	})
 }
 
