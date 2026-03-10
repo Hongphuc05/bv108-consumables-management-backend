@@ -94,8 +94,8 @@ func main() {
 		}
 	}()
 
-	log.Printf("🚀 Server is running on http://localhost:%s", config.AppConfig.ServerPort)
-	log.Printf("📊 API documentation available at http://localhost:%s/health", config.AppConfig.ServerPort)
+	log.Printf("Server is running on http://localhost:%s", config.AppConfig.ServerPort)
+	log.Printf("API documentation available at http://localhost:%s/health", config.AppConfig.ServerPort)
 
 	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)
