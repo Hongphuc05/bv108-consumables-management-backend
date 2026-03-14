@@ -73,7 +73,8 @@ func main() {
 			supplies.GET("/groups", supplyHandler.GetAllGroups)               // GET /api/supplies/groups
 			supplies.GET("/group", supplyHandler.GetSuppliesByGroup)          // GET /api/supplies/group?groupName=xxx
 			supplies.GET("/low-stock", supplyHandler.GetLowStockSupplies)     // GET /api/supplies/low-stock?threshold=20
-			supplies.GET("/compare-catalog", supplyHandler.GetCompareCatalog) // GET /api/supplies/compare-catalog?page=1&pageSize=20&keyword=xxx
+			supplies.GET("/compare-groups", supplyHandler.GetCompareGroups)   // GET /api/supplies/compare-groups
+			supplies.GET("/compare-catalog", supplyHandler.GetCompareCatalog) // GET /api/supplies/compare-catalog?page=1&pageSize=20&keyword=xxx&groupFilter=yyy
 			supplies.POST("/compare", supplyHandler.CompareSupplies)          // POST /api/supplies/compare
 			supplies.GET("/:id", supplyHandler.GetSupplyByID)                 // GET /api/supplies/:id
 		}

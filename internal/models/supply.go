@@ -402,19 +402,21 @@ func (r *SupplyRepository) GetLowStock(threshold int, page, pageSize int) ([]Sup
 	return supplies, total, nil
 }
 
-// GetCompareCatalog retrieves comparison catalog rows with pagination and keyword search.
-func (r *SupplyRepository) GetCompareCatalog(keyword string, page, pageSize int) ([]CompareSupply, int, error) {
+// GetCompareCatalog retrieves comparison catalog rows with pagination, keyword search, and ma_thong_tu_04 filtering.
+func (r *SupplyRepository) GetCompareCatalog(keyword string, groupFilter string, page, pageSize int) ([]CompareSupply, int, error) {
 	offset := (page - 1) * pageSize
 	search := "%" + keyword + "%"
+	groupSearch := strings.TrimSpace(groupFilter)
 
 	countQuery := `
 		SELECT COUNT(*)
 		FROM so_sanh_vat_tu
-		WHERE (? = '' OR ma_thu_vien LIKE ? OR ten_vat_tu_2025 LIKE ? OR ten_cong_ty LIKE ?)
+		WHERE (? = '' OR ma_thu_vien LIKE ? OR ten_vat_tu_2025 LIKE ? OR ten_cong_ty LIKE ? OR ma_thong_tu_04 LIKE ?)
+		  AND (? = '' OR TRIM(IFNULL(ma_thong_tu_04, '')) = ?)
 	`
 
 	var total int
-	err := r.DB.QueryRow(countQuery, keyword, search, search, search).Scan(&total)
+	err := r.DB.QueryRow(countQuery, keyword, search, search, search, search, groupSearch, groupSearch).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error counting compare catalog: %w", err)
 	}
@@ -434,12 +436,13 @@ func (r *SupplyRepository) GetCompareCatalog(keyword string, page, pageSize int)
 			hang_san_xuat, nuoc_san_xuat, nhom_nuoc, chat_luong,
 			ma_5086, ten_thuong_mai, created_at, updated_at
 		FROM so_sanh_vat_tu
-		WHERE (? = '' OR ma_thu_vien LIKE ? OR ten_vat_tu_2025 LIKE ? OR ten_cong_ty LIKE ?)
+		WHERE (? = '' OR ma_thu_vien LIKE ? OR ten_vat_tu_2025 LIKE ? OR ten_cong_ty LIKE ? OR ma_thong_tu_04 LIKE ?)
+		  AND (? = '' OR TRIM(IFNULL(ma_thong_tu_04, '')) = ?)
 		ORDER BY stt
 		LIMIT ? OFFSET ?
 	`
 
-	rows, err := r.DB.Query(query, keyword, search, search, search, pageSize, offset)
+	rows, err := r.DB.Query(query, keyword, search, search, search, search, groupSearch, groupSearch, pageSize, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error querying compare catalog: %w", err)
 	}
@@ -455,6 +458,33 @@ func (r *SupplyRepository) GetCompareCatalog(keyword string, page, pageSize int)
 	}
 
 	return items, total, nil
+}
+
+// GetCompareGroups retrieves distinct non-empty ma_thong_tu_04 values for compare filtering.
+func (r *SupplyRepository) GetCompareGroups() ([]string, error) {
+	query := `
+		SELECT DISTINCT TRIM(ma_thong_tu_04) AS group_value
+		FROM so_sanh_vat_tu
+		WHERE TRIM(IFNULL(ma_thong_tu_04, '')) <> ''
+		ORDER BY group_value
+	`
+
+	rows, err := r.DB.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("error querying compare groups: %w", err)
+	}
+	defer rows.Close()
+
+	groups := []string{}
+	for rows.Next() {
+		var group string
+		if err := rows.Scan(&group); err != nil {
+			return nil, fmt.Errorf("error scanning compare group: %w", err)
+		}
+		groups = append(groups, group)
+	}
+
+	return groups, nil
 }
 
 // GetCompareByLibraryCodes retrieves comparison rows for selected library codes.

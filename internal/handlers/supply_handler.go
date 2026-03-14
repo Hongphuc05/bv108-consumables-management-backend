@@ -290,6 +290,7 @@ func (h *SupplyHandler) GetLowStockSupplies(c *gin.Context) {
 // GetCompareCatalog returns paginated rows from so_sanh_vat_tu for selection list.
 func (h *SupplyHandler) GetCompareCatalog(c *gin.Context) {
 	keyword := strings.TrimSpace(c.Query("keyword"))
+	groupFilter := strings.TrimSpace(c.Query("groupFilter"))
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
 
@@ -300,7 +301,7 @@ func (h *SupplyHandler) GetCompareCatalog(c *gin.Context) {
 		pageSize = 20
 	}
 
-	items, total, err := h.repo.GetCompareCatalog(keyword, page, pageSize)
+	items, total, err := h.repo.GetCompareCatalog(keyword, groupFilter, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error:   "DATABASE_ERROR",
@@ -317,6 +318,23 @@ func (h *SupplyHandler) GetCompareCatalog(c *gin.Context) {
 		PageSize:   pageSize,
 		Total:      total,
 		TotalPages: totalPages,
+	})
+}
+
+// GetCompareGroups returns distinct ma_thong_tu_04 values for compare filtering.
+func (h *SupplyHandler) GetCompareGroups(c *gin.Context) {
+	groups, err := h.repo.GetCompareGroups()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error:   "DATABASE_ERROR",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"groups": groups,
+		"total":  len(groups),
 	})
 }
 
