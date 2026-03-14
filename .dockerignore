@@ -1,0 +1,9 @@
+.git
+.gitignore
+.env
+README.md
+SETUP.md
+ubot-api/__pycache__
+ubot-api/*.csv
+ubot-api/*.json
+*.log

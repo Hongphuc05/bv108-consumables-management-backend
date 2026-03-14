@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -15,6 +16,7 @@ type Config struct {
 	DBUser          string
 	DBPassword      string
 	DBName          string
+	DBTLS           string
 	ServerPort      string
 	GinMode         string
 	FrontendURL     string
@@ -31,16 +33,19 @@ func LoadConfig() error {
 		log.Println("No .env file found, using system environment variables")
 	}
 
+	serverPort := getEnv("PORT", getEnv("SERVER_PORT", "8080"))
+
 	AppConfig = &Config{
 		DBHost:          getEnv("DB_HOST", "localhost"),
 		DBPort:          getEnv("DB_PORT", "3306"),
 		DBUser:          getEnv("DB_USER", "root"),
 		DBPassword:      getEnv("DB_PASSWORD", ""),
 		DBName:          getEnv("DB_NAME", "hospital_db"),
-		ServerPort:      getEnv("SERVER_PORT", "8080"),
+		DBTLS:           getEnv("DB_TLS", ""),
+		ServerPort:      serverPort,
 		GinMode:         getEnv("GIN_MODE", "debug"),
 		FrontendURL:     getEnv("FRONTEND_URL", "http://localhost:5173"),
-		JWTSecret:       getEnv("JWT_SECRET", "change-this-secret"),
+		JWTSecret:       getEnv("JWT_SECRET", "key_for_jwt"),
 		JWTExpiresHours: getEnvAsInt("JWT_EXPIRES_HOURS", 8),
 	}
 
@@ -49,13 +54,24 @@ func LoadConfig() error {
 
 // GetDSN returns the MySQL Data Source Name
 func (c *Config) GetDSN() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+	tlsMode := c.DBTLS
+	if tlsMode == "" && strings.Contains(c.DBHost, ".mysql.database.azure.com") {
+		tlsMode = "true"
+	}
+
+	baseDSN := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 		c.DBUser,
 		c.DBPassword,
 		c.DBHost,
 		c.DBPort,
 		c.DBName,
 	)
+
+	if tlsMode != "" {
+		return baseDSN + "&tls=" + tlsMode
+	}
+
+	return baseDSN
 }
 
 func getEnv(key, defaultValue string) string {
