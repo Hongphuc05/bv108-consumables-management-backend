@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,13 +21,108 @@ func NewRefreshHandler(repo interface{ GetCount() (int, error) }) *RefreshHandle
 	return &RefreshHandler{hoaDonRepo: repo}
 }
 
-func (h *RefreshHandler) RefreshInvoices(c *gin.Context) {
-	// Lấy Python path từ biến môi trường, mặc định là "python" nếu không set
-	pythonPath := os.Getenv("PYTHON_PATH")
-	if pythonPath == "" {
-		pythonPath = "python" // Sử dụng python trong PATH
+func parseCommandSpec(spec string) (string, []string) {
+	trimmed := strings.TrimSpace(spec)
+	if trimmed == "" {
+		return "", nil
 	}
 
+	unquoted := strings.Trim(trimmed, "\"")
+	if _, err := os.Stat(unquoted); err == nil {
+		return unquoted, nil
+	}
+
+	parts := strings.Fields(trimmed)
+	if len(parts) == 0 {
+		return "", nil
+	}
+	parts[0] = strings.Trim(parts[0], "\"")
+	return parts[0], parts[1:]
+}
+
+func commandExists(command string) bool {
+	if command == "" {
+		return false
+	}
+
+	if strings.ContainsAny(command, `/\`) {
+		_, err := os.Stat(command)
+		return err == nil
+	}
+
+	_, err := exec.LookPath(command)
+	return err == nil
+}
+
+func pythonRuntimeUsable(command string, args []string) bool {
+	probeArgs := append(append([]string{}, args...), "--version")
+	probeCmd := exec.Command(command, probeArgs...)
+
+	var outBuf, errBuf bytes.Buffer
+	probeCmd.Stdout = &outBuf
+	probeCmd.Stderr = &errBuf
+
+	if err := probeCmd.Run(); err != nil {
+		return false
+	}
+
+	output := strings.ToLower(outBuf.String() + "\n" + errBuf.String())
+	return strings.Contains(output, "python")
+}
+
+func resolvePythonRuntime(ubotDir string) (string, []string, []string) {
+	type candidate struct {
+		label string
+		spec  string
+	}
+
+	candidates := make([]candidate, 0, 8)
+
+	if envSpec := strings.TrimSpace(os.Getenv("PYTHON_PATH")); envSpec != "" {
+		candidates = append(candidates, candidate{
+			label: "PYTHON_PATH",
+			spec:  envSpec,
+		})
+	}
+
+	candidates = append(candidates,
+		candidate{label: "venv-windows", spec: filepath.Join(ubotDir, ".venv", "Scripts", "python.exe")},
+		candidate{label: "venv-linux", spec: filepath.Join(ubotDir, ".venv", "bin", "python")},
+	)
+
+	if runtime.GOOS == "windows" {
+		candidates = append(candidates,
+			candidate{label: "py -3", spec: "py -3"},
+			candidate{label: "py", spec: "py"},
+			candidate{label: "python3", spec: "python3"},
+			candidate{label: "python", spec: "python"},
+		)
+	} else {
+		candidates = append(candidates,
+			candidate{label: "python3", spec: "python3"},
+			candidate{label: "python", spec: "python"},
+			candidate{label: "py -3", spec: "py -3"},
+			candidate{label: "py", spec: "py"},
+		)
+	}
+
+	tried := make([]string, 0, len(candidates))
+	for _, item := range candidates {
+		cmd, args := parseCommandSpec(item.spec)
+		if cmd == "" {
+			continue
+		}
+
+		tried = append(tried, fmt.Sprintf("%s => %s", item.label, item.spec))
+		if commandExists(cmd) && pythonRuntimeUsable(cmd, args) {
+			return cmd, args, tried
+		}
+	}
+
+	return "", nil, tried
+}
+
+func (h *RefreshHandler) RefreshInvoices(c *gin.Context) {
 	// Lấy thư mục gốc của project từ working directory
 	projectRoot, err := os.Getwd()
 	if err != nil {
@@ -37,10 +134,32 @@ func (h *RefreshHandler) RefreshInvoices(c *gin.Context) {
 	}
 
 	ubotDir := filepath.Join(projectRoot, "ubot-api")
+	if _, err := os.Stat(ubotDir); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "UBot script directory not found",
+			"details": fmt.Sprintf("expected path: %s", ubotDir),
+		})
+		return
+	}
+
+	pythonCmd, pythonBaseArgs, tried := resolvePythonRuntime(ubotDir)
+	if pythonCmd == "" {
+		hint := "Install Python 3 and set PYTHON_PATH (e.g. PYTHON_PATH=python3)."
+		if runtime.GOOS == "windows" {
+			hint = "Install Python 3 and set PYTHON_PATH=py -3 or PYTHON_PATH=<path-to-python.exe>."
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Python runtime not found",
+			"details": hint,
+			"tried":   tried,
+		})
+		return
+	}
 
 	// Step 1: Export - Dùng auto_export.py không cần input
 	fmt.Println("🚀 Crawling invoices...")
-	exportCmd := exec.Command(pythonPath, "auto_export.py")
+	exportArgs := append(append([]string{}, pythonBaseArgs...), "auto_export.py")
+	exportCmd := exec.Command(pythonCmd, exportArgs...)
 	exportCmd.Dir = ubotDir
 
 	var outBuf, errBuf bytes.Buffer
@@ -59,7 +178,8 @@ func (h *RefreshHandler) RefreshInvoices(c *gin.Context) {
 
 	// Step 2: Import
 	fmt.Println("📥 Importing to database...")
-	importCmd := exec.Command(pythonPath, "import_csv_to_db.py", "invoices_export.csv", "true")
+	importArgs := append(append([]string{}, pythonBaseArgs...), "import_csv_to_db.py", "invoices_export.csv", "true")
+	importCmd := exec.Command(pythonCmd, importArgs...)
 	importCmd.Dir = ubotDir
 
 	var importOut, importErr bytes.Buffer

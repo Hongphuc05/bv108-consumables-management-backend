@@ -38,35 +38,32 @@ type CompareSupply struct {
 	TenCongTy                  sql.NullString  `json:"tenCongTy"`
 	MaThuVien                  sql.NullString  `json:"maThuVien"`
 	MaThongTu04                sql.NullString  `json:"maThongTu04"`
-	TenVatTu2025               sql.NullString  `json:"tenVatTu2025"`
-	ThongSoMoiThau2025         sql.NullString  `json:"thongSoMoiThau2025"`
-	ThongSoHieuChinh2026       sql.NullString  `json:"thongSoHieuChinh2026"`
-	ThongSoKyThuat1            sql.NullString  `json:"thongSoKyThuat1"`
-	ThongSoKyThuat2            sql.NullString  `json:"thongSoKyThuat2"`
-	ThongSoKyThuat3            sql.NullString  `json:"thongSoKyThuat3"`
-	ThongSoKyThuat4            sql.NullString  `json:"thongSoKyThuat4"`
-	ThongSoKyThuat5            sql.NullString  `json:"thongSoKyThuat5"`
-	ThongSoKyThuat9            sql.NullString  `json:"thongSoKyThuat9"`
-	MaVtthTuongDuong           sql.NullString  `json:"maVtthTuongDuong"`
-	CongTyVtthTuongDuong       sql.NullString  `json:"congTyVtthTuongDuong"`
+	TenVatTu                   sql.NullString  `json:"tenVatTu"`
+	TenThuongMai               sql.NullString  `json:"tenThuongMai"`
+	TSKT2025                   sql.NullString  `json:"tskt2025"`
+	TSKT2026                   sql.NullString  `json:"tskt2026"`
+	ChatLieuVatLieu            sql.NullString  `json:"chatLieuVatLieu"`
+	DacTinhCauTao              sql.NullString  `json:"dacTinhCauTao"`
+	KichThuoc                  sql.NullString  `json:"kichThuoc"`
+	ChieuDai                   sql.NullString  `json:"chieuDai"`
+	TinhNangSuDung             sql.NullString  `json:"tinhNangSuDung"`
+	TSKTKhac                   sql.NullString  `json:"tsktKhac"`
 	DVT                        sql.NullString  `json:"dvt"`
 	SoLuongSuDung12Thang       sql.NullFloat64 `json:"soLuongSuDung12Thang"`
-	SoLuongTrungThau2025BoSung sql.NullInt32   `json:"soLuongTrungThau2025BoSung"`
+	SoLuongTrungThau2025BoSung sql.NullFloat64 `json:"soLuongTrungThau2025BoSung"`
 	DonGiaTrungThau2025        sql.NullFloat64 `json:"donGiaTrungThau2025"`
 	DonGiaDeXuat2026           sql.NullFloat64 `json:"donGiaDeXuat2026"`
 	KetQuaTrungThauThapNhat    sql.NullFloat64 `json:"ketQuaTrungThauThapNhat"`
 	ThoiGianDangTaiThapNhat    sql.NullString  `json:"thoiGianDangTaiThapNhat"`
 	KetQuaTrungThauCaoNhat     sql.NullFloat64 `json:"ketQuaTrungThauCaoNhat"`
 	ThoiGianDangTaiCaoNhat     sql.NullString  `json:"thoiGianDangTaiCaoNhat"`
-	CongTyThamKhao             sql.NullString  `json:"congTyThamKhao"`
 	MaSoThue                   sql.NullString  `json:"maSoThue"`
-	KyMaHieu                   sql.NullString  `json:"kyMaHieu"`
-	HangSanXuat                sql.NullString  `json:"hangSanXuat"`
-	NuocSanXuat                sql.NullString  `json:"nuocSanXuat"`
+	MaHieu                     sql.NullString  `json:"maHieu"`
+	HangSX                     sql.NullString  `json:"hangSx"`
+	NuocSX                     sql.NullString  `json:"nuocSx"`
 	NhomNuoc                   sql.NullString  `json:"nhomNuoc"`
 	ChatLuong                  sql.NullString  `json:"chatLuong"`
 	Ma5086                     sql.NullString  `json:"ma5086"`
-	TenThuongMai               sql.NullString  `json:"tenThuongMai"`
 	CreatedAt                  sql.NullTime    `json:"createdAt"`
 	UpdatedAt                  sql.NullTime    `json:"updatedAt"`
 }
@@ -80,17 +77,16 @@ func scanCompareSupplyRow(scanner interface {
 		&item.TenCongTy,
 		&item.MaThuVien,
 		&item.MaThongTu04,
-		&item.TenVatTu2025,
-		&item.ThongSoMoiThau2025,
-		&item.ThongSoHieuChinh2026,
-		&item.ThongSoKyThuat1,
-		&item.ThongSoKyThuat2,
-		&item.ThongSoKyThuat3,
-		&item.ThongSoKyThuat4,
-		&item.ThongSoKyThuat5,
-		&item.ThongSoKyThuat9,
-		&item.MaVtthTuongDuong,
-		&item.CongTyVtthTuongDuong,
+		&item.TenVatTu,
+		&item.TenThuongMai,
+		&item.TSKT2025,
+		&item.TSKT2026,
+		&item.ChatLieuVatLieu,
+		&item.DacTinhCauTao,
+		&item.KichThuoc,
+		&item.ChieuDai,
+		&item.TinhNangSuDung,
+		&item.TSKTKhac,
 		&item.DVT,
 		&item.SoLuongSuDung12Thang,
 		&item.SoLuongTrungThau2025BoSung,
@@ -100,15 +96,13 @@ func scanCompareSupplyRow(scanner interface {
 		&item.ThoiGianDangTaiThapNhat,
 		&item.KetQuaTrungThauCaoNhat,
 		&item.ThoiGianDangTaiCaoNhat,
-		&item.CongTyThamKhao,
 		&item.MaSoThue,
-		&item.KyMaHieu,
-		&item.HangSanXuat,
-		&item.NuocSanXuat,
+		&item.MaHieu,
+		&item.HangSX,
+		&item.NuocSX,
 		&item.NhomNuoc,
 		&item.ChatLuong,
 		&item.Ma5086,
-		&item.TenThuongMai,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	)
@@ -410,7 +404,7 @@ func (r *SupplyRepository) GetCompareCatalog(keyword string, groupFilter string,
 	countQuery := `
 		SELECT COUNT(*)
 		FROM so_sanh_vat_tu
-		WHERE (? = '' OR ma_thu_vien LIKE ? OR ten_vat_tu_2025 LIKE ? OR ten_cong_ty LIKE ? OR ma_thong_tu_04 LIKE ?)
+		WHERE (? = '' OR ma_thu_vien LIKE ? OR ten_vat_tu LIKE ? OR ten_cong_ty LIKE ? OR ma_thong_tu_04 LIKE ?)
 		  AND (? = '' OR TRIM(IFNULL(ma_thong_tu_04, '')) = ?)
 	`
 
@@ -422,20 +416,17 @@ func (r *SupplyRepository) GetCompareCatalog(keyword string, groupFilter string,
 
 	query := `
 		SELECT
-			stt, ten_cong_ty, ma_thu_vien, ma_thong_tu_04, ten_vat_tu_2025,
-			thong_so_moi_thau_2025, thong_so_hieu_chinh_2026,
-			thong_so_ky_thuat_1, thong_so_ky_thuat_2, thong_so_ky_thuat_3,
-			thong_so_ky_thuat_4, thong_so_ky_thuat_5, thong_so_ky_thuat_9,
-			ma_vtth_tuong_duong, cong_ty_vtth_tuong_duong, dvt,
+			stt, ten_cong_ty, ma_thu_vien, ma_thong_tu_04, ten_vat_tu,
+			ten_thuong_mai, tskt_2025, tskt_2026, chat_lieu_vat_lieu,
+			dac_tinh_cau_tao, kich_thuoc, chieu_dai, tinh_nang_su_dung, tskt_khac, dvt,
 			so_luong_su_dung_12_thang, so_luong_trung_thau_2025_bo_sung,
 			don_gia_trung_thau_2025, don_gia_de_xuat_2026,
 			ket_qua_trung_thau_thap_nhat, thoi_gian_don_vi_dang_tai_thap_nhat,
 			ket_qua_trung_thau_cao_nhat, thoi_gian_don_vi_dang_tai_cao_nhat,
-			cong_ty_tham_khao, ma_so_thue, ky_ma_hieu,
-			hang_san_xuat, nuoc_san_xuat, nhom_nuoc, chat_luong,
-			ma_5086, ten_thuong_mai, created_at, updated_at
+			ma_so_thue, ma_hieu, hangsx, nuoc_sx, nhom_nuoc, chat_luong,
+			ma_5086, created_at, updated_at
 		FROM so_sanh_vat_tu
-		WHERE (? = '' OR ma_thu_vien LIKE ? OR ten_vat_tu_2025 LIKE ? OR ten_cong_ty LIKE ? OR ma_thong_tu_04 LIKE ?)
+		WHERE (? = '' OR ma_thu_vien LIKE ? OR ten_vat_tu LIKE ? OR ten_cong_ty LIKE ? OR ma_thong_tu_04 LIKE ?)
 		  AND (? = '' OR TRIM(IFNULL(ma_thong_tu_04, '')) = ?)
 		ORDER BY stt
 		LIMIT ? OFFSET ?
@@ -496,18 +487,15 @@ func (r *SupplyRepository) GetCompareByLibraryCodes(maThuVien []string) ([]Compa
 
 	query := fmt.Sprintf(`
 		SELECT
-			stt, ten_cong_ty, ma_thu_vien, ma_thong_tu_04, ten_vat_tu_2025,
-			thong_so_moi_thau_2025, thong_so_hieu_chinh_2026,
-			thong_so_ky_thuat_1, thong_so_ky_thuat_2, thong_so_ky_thuat_3,
-			thong_so_ky_thuat_4, thong_so_ky_thuat_5, thong_so_ky_thuat_9,
-			ma_vtth_tuong_duong, cong_ty_vtth_tuong_duong, dvt,
+			stt, ten_cong_ty, ma_thu_vien, ma_thong_tu_04, ten_vat_tu,
+			ten_thuong_mai, tskt_2025, tskt_2026, chat_lieu_vat_lieu,
+			dac_tinh_cau_tao, kich_thuoc, chieu_dai, tinh_nang_su_dung, tskt_khac, dvt,
 			so_luong_su_dung_12_thang, so_luong_trung_thau_2025_bo_sung,
 			don_gia_trung_thau_2025, don_gia_de_xuat_2026,
 			ket_qua_trung_thau_thap_nhat, thoi_gian_don_vi_dang_tai_thap_nhat,
 			ket_qua_trung_thau_cao_nhat, thoi_gian_don_vi_dang_tai_cao_nhat,
-			cong_ty_tham_khao, ma_so_thue, ky_ma_hieu,
-			hang_san_xuat, nuoc_san_xuat, nhom_nuoc, chat_luong,
-			ma_5086, ten_thuong_mai, created_at, updated_at
+			ma_so_thue, ma_hieu, hangsx, nuoc_sx, nhom_nuoc, chat_luong,
+			ma_5086, created_at, updated_at
 		FROM so_sanh_vat_tu
 		WHERE ma_thu_vien IN (%s)
 		ORDER BY FIELD(ma_thu_vien, %s)
