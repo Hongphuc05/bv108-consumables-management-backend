@@ -87,14 +87,30 @@ curl https://<backend-fqdn>/health
 https://<frontend-fqdn>
 ```
 
-## 4. Lưu ý quan trọng
+## 4. Refresh bảng so_sanh_vat_tu từ CSV mới
+
+Lệnh dưới đây sẽ **xóa và tạo lại** bảng `hospital_db.so_sanh_vat_tu`, sau đó import dữ liệu từ file CSV:
+
+```bash
+cd /path/to/bv108-consumables-management-backend
+python3 scripts/import_so_sanh_vat_tu_csv.py "/path/to/export(csv).csv" --env-file .env
+```
+
+Kết quả script sẽ in:
+- Số dòng đã insert
+- Số dòng trống bị bỏ qua
+- Tổng bản ghi trong DB sau khi import
+
+Lưu ý: file CSV phải có dòng tiêu đề đúng định dạng (các cột `ten_cong_ty`, `ma_thu_vien`, `TSKT_2025`, ... `Mã 5086`).
+
+## 5. Lưu ý quan trọng
 
 - `DB_USER` phải là `bv108` (không phải `bv108@bv108`).
 - `DB_TLS` nên là `true` cho Azure MySQL.
 - Backend đọc `PORT` tự động (đã hỗ trợ trong `config/config.go`).
 - FE dùng `VITE_API_URL` nên không còn hardcode localhost.
 
-## 5. Nếu app đã tồn tại
+## 6. Nếu app đã tồn tại
 
 Script này dành cho deploy mới (initial deploy).  
 Nếu app đã tồn tại, đổi tên app hoặc xóa app cũ trước khi chạy lại.
