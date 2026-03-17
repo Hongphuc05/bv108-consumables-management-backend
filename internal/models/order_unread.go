@@ -59,7 +59,7 @@ func (r *OrderUnreadRepository) GetUnreadSnapshot(userID int64) (*OrderUnreadSna
 			SELECT 1
 			FROM pending_orders
 			WHERE source = ?
-			  AND created_at_ts > ?
+			  AND created_at_ts >= DATE_SUB(?, INTERVAL 1 SECOND)
 			LIMIT 1
 		)
 	`, OrderSourceForecast, lastSeenAt).Scan(&hasRedDot); err != nil {
@@ -101,20 +101,20 @@ func (r *OrderUnreadRepository) GetUnreadSnapshot(userID int64) (*OrderUnreadSna
 	}, nil
 }
 
-func (r *OrderUnreadRepository) MarkSupplierAlertSeen(userID int64, seenAt time.Time) error {
+func (r *OrderUnreadRepository) MarkSupplierAlertSeen(userID int64, _ time.Time) error {
 	if _, err := r.DB.Exec(`
 		INSERT INTO supplier_alert_reads (user_id, last_seen_at, updated_at)
-		VALUES (?, ?, ?)
+		VALUES (?, NOW(), NOW())
 		ON DUPLICATE KEY UPDATE
 			last_seen_at = VALUES(last_seen_at),
 			updated_at = VALUES(updated_at)
-	`, userID, seenAt, seenAt); err != nil {
+	`, userID); err != nil {
 		return fmt.Errorf("error marking supplier alert seen: %w", err)
 	}
 	return nil
 }
 
-func (r *OrderUnreadRepository) MarkGroupsSeen(userID int64, groupKeys []string, seenAt time.Time) error {
+func (r *OrderUnreadRepository) MarkGroupsSeen(userID int64, groupKeys []string, _ time.Time) error {
 	if len(groupKeys) == 0 {
 		return nil
 	}
@@ -127,7 +127,7 @@ func (r *OrderUnreadRepository) MarkGroupsSeen(userID int64, groupKeys []string,
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO order_group_reads (user_id, group_key, seen_at)
-		VALUES (?, ?, ?)
+		VALUES (?, ?, NOW())
 		ON DUPLICATE KEY UPDATE seen_at = VALUES(seen_at)
 	`)
 	if err != nil {
@@ -139,7 +139,7 @@ func (r *OrderUnreadRepository) MarkGroupsSeen(userID int64, groupKeys []string,
 		if groupKey == "" {
 			continue
 		}
-		if _, err := stmt.Exec(userID, groupKey, seenAt); err != nil {
+		if _, err := stmt.Exec(userID, groupKey); err != nil {
 			return fmt.Errorf("error marking group seen: %w", err)
 		}
 	}

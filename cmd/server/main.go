@@ -139,6 +139,8 @@ func main() {
 		forecastApprovals := api.Group("/forecast-approvals")
 		{
 			forecastApprovals.GET("", forecastApprovalHandler.GetForecastApprovals)
+			forecastApprovals.GET("/history", forecastApprovalHandler.GetForecastChangeHistory)
+			forecastApprovals.GET("/monthly-history", forecastApprovalHandler.GetForecastMonthlyHistory)
 			forecastApprovals.POST("", forecastApprovalHandler.SaveForecastApproval)
 			forecastApprovals.POST("/bulk", forecastApprovalHandler.SaveForecastApprovalsBulk)
 		}

@@ -66,6 +66,37 @@ func (h *ForecastApprovalHandler) GetForecastApprovals(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": records})
 }
 
+func (h *ForecastApprovalHandler) GetForecastChangeHistory(c *gin.Context) {
+	if _, err := getCurrentUserFromAuthorizationHeader(c, h.userRepo, h.jwtSecret); err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "1000"))
+	records, err := h.repo.ListChangeHistory(limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": records})
+}
+
+func (h *ForecastApprovalHandler) GetForecastMonthlyHistory(c *gin.Context) {
+	if _, err := getCurrentUserFromAuthorizationHeader(c, h.userRepo, h.jwtSecret); err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	records, err := h.repo.ListMonthlyChangeHistory()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": records})
+}
+
 func (h *ForecastApprovalHandler) SaveForecastApproval(c *gin.Context) {
 	currentUser, err := getCurrentUserFromAuthorizationHeader(c, h.userRepo, h.jwtSecret)
 	if err != nil {
