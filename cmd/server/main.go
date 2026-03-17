@@ -35,6 +35,16 @@ func main() {
 	supplyHandler := handlers.NewSupplyHandler(supplyRepo)
 	userRepo := models.NewUserRepository(database.DB)
 	authHandler := handlers.NewAuthHandler(userRepo, config.AppConfig.JWTSecret, config.AppConfig.JWTExpiresHours)
+	orderRepo := models.NewOrderRepository(database.DB)
+	if err := orderRepo.EnsureSchema(); err != nil {
+		log.Fatal("Failed to initialize order history schema:", err)
+	}
+	orderHandler := handlers.NewOrderHandler(orderRepo, userRepo, config.AppConfig.JWTSecret)
+	forecastApprovalRepo := models.NewForecastApprovalRepository(database.DB)
+	if err := forecastApprovalRepo.EnsureSchema(); err != nil {
+		log.Fatal("Failed to initialize forecast approval schema:", err)
+	}
+	forecastApprovalHandler := handlers.NewForecastApprovalHandler(forecastApprovalRepo, userRepo, config.AppConfig.JWTSecret)
 
 	hoaDonRepo := models.NewHoaDonRepository(database.DB)
 	hoaDonHandler := handlers.NewHoaDonHandler(hoaDonRepo)
@@ -85,6 +95,22 @@ func main() {
 			hoaDon.GET("/search", hoaDonHandler.SearchHoaDon)       // GET /api/hoa-don/search?q=keyword
 			hoaDon.GET("/:id", hoaDonHandler.GetHoaDonByID)         // GET /api/hoa-don/:id
 			hoaDon.POST("/refresh", refreshHandler.RefreshInvoices) // POST /api/hoa-don/refresh
+		}
+
+		orders := api.Group("/orders")
+		{
+			orders.GET("/pending", orderHandler.GetPendingOrders)
+			orders.GET("/history", orderHandler.GetOrderHistory)
+			orders.POST("/pending/forecast", orderHandler.CreateForecastOrders)
+			orders.POST("/pending/manual", orderHandler.CreateManualOrder)
+			orders.POST("/place", orderHandler.PlaceOrders)
+		}
+
+		forecastApprovals := api.Group("/forecast-approvals")
+		{
+			forecastApprovals.GET("", forecastApprovalHandler.GetForecastApprovals)
+			forecastApprovals.POST("", forecastApprovalHandler.SaveForecastApproval)
+			forecastApprovals.POST("/bulk", forecastApprovalHandler.SaveForecastApprovalsBulk)
 		}
 	}
 
