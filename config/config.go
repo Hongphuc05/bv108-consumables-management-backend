@@ -17,6 +17,11 @@ type Config struct {
 	DBPassword      string
 	DBName          string
 	DBTLS           string
+	SMTPHost        string
+	SMTPPort        string
+	SMTPUsername    string
+	SMTPAppPassword string
+	SMTPFrom        string
 	ServerPort      string
 	GinMode         string
 	FrontendURL     string
@@ -42,6 +47,11 @@ func LoadConfig() error {
 		DBPassword:      getEnv("DB_PASSWORD", ""),
 		DBName:          getEnv("DB_NAME", "hospital_db"),
 		DBTLS:           getEnv("DB_TLS", ""),
+		SMTPHost:        getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPPort:        getEnv("SMTP_PORT", "587"),
+		SMTPUsername:    getEnv("SMTP_USERNAME", "kaelbridmon1990@gmail.com"),
+		SMTPAppPassword: getEnv("SMTP_APP_PASSWORD", ""),
+		SMTPFrom:        getEnv("SMTP_FROM", "kaelbridmon1990@gmail.com"),
 		ServerPort:      serverPort,
 		GinMode:         getEnv("GIN_MODE", "debug"),
 		FrontendURL:     getEnv("FRONTEND_URL", "http://localhost:5173"),
