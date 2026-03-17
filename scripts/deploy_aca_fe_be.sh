@@ -145,6 +145,11 @@ DB_PORT="${DB_PORT:-3306}"
 DB_TLS="${DB_TLS:-true}"
 GIN_MODE="${GIN_MODE:-release}"
 JWT_SECRET="${JWT_SECRET:-change-this-secret-in-production}"
+SMTP_HOST="${SMTP_HOST:-smtp.gmail.com}"
+SMTP_PORT="${SMTP_PORT:-587}"
+SMTP_USERNAME="${SMTP_USERNAME:-}"
+SMTP_APP_PASSWORD="${SMTP_APP_PASSWORD:-}"
+SMTP_FROM="${SMTP_FROM:-$SMTP_USERNAME}"
 
 if [[ -z "${ACR_NAME:-}" ]]; then
   ACR_NAME="bv108acr$(date +%s | cut -c 5-10)"
@@ -181,14 +186,15 @@ if ! az_cli containerapp env show --name "$ACA_ENV_NAME" --resource-group "$RG" 
   az_cli containerapp env create --name "$ACA_ENV_NAME" --resource-group "$RG" --location "$LOCATION" >/dev/null
 fi
 
+backend_exists=false
+frontend_exists=false
+
 if az_cli containerapp show --name "$BACKEND_APP_NAME" --resource-group "$RG" >/dev/null 2>&1; then
-  echo "Backend app '$BACKEND_APP_NAME' already exists. Use a new BACKEND_APP_NAME or remove existing app first." >&2
-  exit 1
+  backend_exists=true
 fi
 
 if az_cli containerapp show --name "$FRONTEND_APP_NAME" --resource-group "$RG" >/dev/null 2>&1; then
-  echo "Frontend app '$FRONTEND_APP_NAME' already exists. Use a new FRONTEND_APP_NAME or remove existing app first." >&2
-  exit 1
+  frontend_exists=true
 fi
 
 echo "==> Get ACR credentials"
@@ -208,30 +214,83 @@ else
 fi
 
 echo "==> Deploy backend container app"
-az_cli containerapp create \
-  --name "$BACKEND_APP_NAME" \
-  --resource-group "$RG" \
-  --environment "$ACA_ENV_NAME" \
-  --image "$BACKEND_IMAGE" \
-  --ingress external \
-  --target-port 8080 \
-  --min-replicas 0 \
-  --max-replicas 1 \
-  --registry-server "${ACR_NAME}.azurecr.io" \
-  --registry-username "$ACR_USERNAME" \
-  --registry-password "$ACR_PASSWORD" \
-  --secrets db-password="$DB_PASSWORD" \
-  --env-vars \
-    DB_HOST="$DB_HOST" \
-    DB_PORT="$DB_PORT" \
-    DB_USER="$DB_USER" \
-    DB_PASSWORD=secretref:db-password \
-    DB_NAME="$DB_NAME" \
-    DB_TLS="$DB_TLS" \
-    GIN_MODE="$GIN_MODE" \
-    JWT_SECRET="$JWT_SECRET" \
-    FRONTEND_URL="http://localhost" \
-  >/dev/null
+backend_secrets=(db-password="$DB_PASSWORD")
+backend_env_vars=(
+  DB_HOST="$DB_HOST"
+  DB_PORT="$DB_PORT"
+  DB_USER="$DB_USER"
+  DB_PASSWORD=secretref:db-password
+  DB_NAME="$DB_NAME"
+  DB_TLS="$DB_TLS"
+  GIN_MODE="$GIN_MODE"
+  JWT_SECRET="$JWT_SECRET"
+  FRONTEND_URL="http://localhost"
+)
+
+if [[ -n "$SMTP_APP_PASSWORD" ]]; then
+  backend_secrets+=(smtp-app-password="$SMTP_APP_PASSWORD")
+fi
+
+if [[ -n "$SMTP_HOST" ]]; then
+  backend_env_vars+=(SMTP_HOST="$SMTP_HOST")
+fi
+if [[ -n "$SMTP_PORT" ]]; then
+  backend_env_vars+=(SMTP_PORT="$SMTP_PORT")
+fi
+if [[ -n "$SMTP_USERNAME" ]]; then
+  backend_env_vars+=(SMTP_USERNAME="$SMTP_USERNAME")
+fi
+if [[ -n "$SMTP_APP_PASSWORD" ]]; then
+  backend_env_vars+=(SMTP_APP_PASSWORD=secretref:smtp-app-password)
+fi
+if [[ -n "$SMTP_FROM" ]]; then
+  backend_env_vars+=(SMTP_FROM="$SMTP_FROM")
+fi
+
+if [[ "$backend_exists" == true ]]; then
+  az_cli containerapp secret set \
+    --name "$BACKEND_APP_NAME" \
+    --resource-group "$RG" \
+    --secrets "${backend_secrets[@]}" \
+    >/dev/null
+  az_cli containerapp registry set \
+    --name "$BACKEND_APP_NAME" \
+    --resource-group "$RG" \
+    --server "${ACR_NAME}.azurecr.io" \
+    --username "$ACR_USERNAME" \
+    --password "$ACR_PASSWORD" \
+    >/dev/null
+  az_cli containerapp update \
+    --name "$BACKEND_APP_NAME" \
+    --resource-group "$RG" \
+    --image "$BACKEND_IMAGE" \
+    --min-replicas 0 \
+    --max-replicas 1 \
+    --set-env-vars "${backend_env_vars[@]}" \
+    >/dev/null
+  az_cli containerapp ingress enable \
+    --name "$BACKEND_APP_NAME" \
+    --resource-group "$RG" \
+    --type external \
+    --target-port 8080 \
+    >/dev/null
+else
+  az_cli containerapp create \
+    --name "$BACKEND_APP_NAME" \
+    --resource-group "$RG" \
+    --environment "$ACA_ENV_NAME" \
+    --image "$BACKEND_IMAGE" \
+    --ingress external \
+    --target-port 8080 \
+    --min-replicas 0 \
+    --max-replicas 1 \
+    --registry-server "${ACR_NAME}.azurecr.io" \
+    --registry-username "$ACR_USERNAME" \
+    --registry-password "$ACR_PASSWORD" \
+    --secrets "${backend_secrets[@]}" \
+    --env-vars "${backend_env_vars[@]}" \
+    >/dev/null
+fi
 
 BACKEND_FQDN="$(az_cli containerapp show --name "$BACKEND_APP_NAME" --resource-group "$RG" --query properties.configuration.ingress.fqdn --output tsv | tr -d '\r')"
 BACKEND_URL="https://${BACKEND_FQDN}"
@@ -264,19 +323,42 @@ else
 fi
 
 echo "==> Deploy frontend container app"
-az_cli containerapp create \
-  --name "$FRONTEND_APP_NAME" \
-  --resource-group "$RG" \
-  --environment "$ACA_ENV_NAME" \
-  --image "$FRONTEND_IMAGE" \
-  --ingress external \
-  --target-port 8080 \
-  --min-replicas 0 \
-  --max-replicas 1 \
-  --registry-server "${ACR_NAME}.azurecr.io" \
-  --registry-username "$ACR_USERNAME" \
-  --registry-password "$ACR_PASSWORD" \
-  >/dev/null
+if [[ "$frontend_exists" == true ]]; then
+  az_cli containerapp registry set \
+    --name "$FRONTEND_APP_NAME" \
+    --resource-group "$RG" \
+    --server "${ACR_NAME}.azurecr.io" \
+    --username "$ACR_USERNAME" \
+    --password "$ACR_PASSWORD" \
+    >/dev/null
+  az_cli containerapp update \
+    --name "$FRONTEND_APP_NAME" \
+    --resource-group "$RG" \
+    --image "$FRONTEND_IMAGE" \
+    --min-replicas 0 \
+    --max-replicas 1 \
+    >/dev/null
+  az_cli containerapp ingress enable \
+    --name "$FRONTEND_APP_NAME" \
+    --resource-group "$RG" \
+    --type external \
+    --target-port 8080 \
+    >/dev/null
+else
+  az_cli containerapp create \
+    --name "$FRONTEND_APP_NAME" \
+    --resource-group "$RG" \
+    --environment "$ACA_ENV_NAME" \
+    --image "$FRONTEND_IMAGE" \
+    --ingress external \
+    --target-port 8080 \
+    --min-replicas 0 \
+    --max-replicas 1 \
+    --registry-server "${ACR_NAME}.azurecr.io" \
+    --registry-username "$ACR_USERNAME" \
+    --registry-password "$ACR_PASSWORD" \
+    >/dev/null
+fi
 
 FRONTEND_FQDN="$(az_cli containerapp show --name "$FRONTEND_APP_NAME" --resource-group "$RG" --query properties.configuration.ingress.fqdn --output tsv | tr -d '\r')"
 FRONTEND_URL="https://${FRONTEND_FQDN}"

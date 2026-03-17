@@ -10,6 +10,7 @@ import (
 	"bv108-consumables-management-backend/internal/database"
 	"bv108-consumables-management-backend/internal/handlers"
 	"bv108-consumables-management-backend/internal/models"
+	"bv108-consumables-management-backend/internal/services"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -39,7 +40,24 @@ func main() {
 	if err := orderRepo.EnsureSchema(); err != nil {
 		log.Fatal("Failed to initialize order history schema:", err)
 	}
-	orderHandler := handlers.NewOrderHandler(orderRepo, userRepo, config.AppConfig.JWTSecret)
+	companyContactRepo := models.NewCompanyContactRepository(database.DB)
+	if err := companyContactRepo.EnsureSchema(); err != nil {
+		log.Fatal("Failed to initialize company contacts schema:", err)
+	}
+	if err := companyContactRepo.SyncFromExistingData(models.DefaultCompanyContactEmail); err != nil {
+		log.Fatal("Failed to sync company contacts:", err)
+	}
+	if err := companyContactRepo.BackfillOrderReferences(); err != nil {
+		log.Fatal("Failed to backfill company contact relations:", err)
+	}
+	orderMailer := services.NewSMTPOrderMailer(
+		config.AppConfig.SMTPHost,
+		config.AppConfig.SMTPPort,
+		config.AppConfig.SMTPUsername,
+		config.AppConfig.SMTPAppPassword,
+		config.AppConfig.SMTPFrom,
+	)
+	orderHandler := handlers.NewOrderHandler(orderRepo, userRepo, config.AppConfig.JWTSecret, orderMailer)
 	forecastApprovalRepo := models.NewForecastApprovalRepository(database.DB)
 	if err := forecastApprovalRepo.EnsureSchema(); err != nil {
 		log.Fatal("Failed to initialize forecast approval schema:", err)
