@@ -10,6 +10,7 @@ import (
 	"bv108-consumables-management-backend/internal/database"
 	"bv108-consumables-management-backend/internal/handlers"
 	"bv108-consumables-management-backend/internal/models"
+	"bv108-consumables-management-backend/internal/realtime"
 	"bv108-consumables-management-backend/internal/services"
 
 	"github.com/gin-contrib/cors"
@@ -40,6 +41,10 @@ func main() {
 	if err := orderRepo.EnsureSchema(); err != nil {
 		log.Fatal("Failed to initialize order history schema:", err)
 	}
+	orderUnreadRepo := models.NewOrderUnreadRepository(database.DB)
+	if err := orderUnreadRepo.EnsureSchema(); err != nil {
+		log.Fatal("Failed to initialize unread schema:", err)
+	}
 	companyContactRepo := models.NewCompanyContactRepository(database.DB)
 	if err := companyContactRepo.EnsureSchema(); err != nil {
 		log.Fatal("Failed to initialize company contacts schema:", err)
@@ -57,7 +62,9 @@ func main() {
 		config.AppConfig.SMTPAppPassword,
 		config.AppConfig.SMTPFrom,
 	)
-	orderHandler := handlers.NewOrderHandler(orderRepo, userRepo, config.AppConfig.JWTSecret, orderMailer)
+	realtimeHub := realtime.NewHub()
+	wsHandler := handlers.NewWSHandler(userRepo, config.AppConfig.JWTSecret, realtimeHub)
+	orderHandler := handlers.NewOrderHandler(orderRepo, orderUnreadRepo, userRepo, config.AppConfig.JWTSecret, orderMailer, realtimeHub)
 	forecastApprovalRepo := models.NewForecastApprovalRepository(database.DB)
 	if err := forecastApprovalRepo.EnsureSchema(); err != nil {
 		log.Fatal("Failed to initialize forecast approval schema:", err)
@@ -86,6 +93,8 @@ func main() {
 	// API routes
 	api := router.Group("/api")
 	{
+		api.GET("/ws", wsHandler.Handle)
+
 		auth := api.Group("/auth")
 		{
 			auth.POST("/register", authHandler.Register)
@@ -119,9 +128,12 @@ func main() {
 		{
 			orders.GET("/pending", orderHandler.GetPendingOrders)
 			orders.GET("/history", orderHandler.GetOrderHistory)
+			orders.GET("/unread-snapshot", orderHandler.GetUnreadSnapshot)
 			orders.POST("/pending/forecast", orderHandler.CreateForecastOrders)
 			orders.POST("/pending/manual", orderHandler.CreateManualOrder)
 			orders.POST("/place", orderHandler.PlaceOrders)
+			orders.POST("/alerts/suppliers/seen", orderHandler.MarkSupplierAlertSeen)
+			orders.POST("/groups/seen", orderHandler.MarkGroupsSeen)
 		}
 
 		forecastApprovals := api.Group("/forecast-approvals")

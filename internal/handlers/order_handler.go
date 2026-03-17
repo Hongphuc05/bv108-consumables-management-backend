@@ -3,10 +3,12 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	"bv108-consumables-management-backend/internal/models"
+	"bv108-consumables-management-backend/internal/realtime"
 	"bv108-consumables-management-backend/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -14,10 +16,12 @@ import (
 )
 
 type OrderHandler struct {
-	repo      *models.OrderRepository
-	userRepo  *models.UserRepository
-	jwtSecret []byte
-	mailer    services.OrderEmailSender
+	repo       *models.OrderRepository
+	unreadRepo *models.OrderUnreadRepository
+	userRepo   *models.UserRepository
+	jwtSecret  []byte
+	mailer     services.OrderEmailSender
+	hub        *realtime.Hub
 }
 
 type CreateForecastOrdersRequest struct {
@@ -41,12 +45,18 @@ type PlaceOrdersRequest struct {
 	OrderIDs []int64 `json:"orderIds" binding:"required"`
 }
 
-func NewOrderHandler(repo *models.OrderRepository, userRepo *models.UserRepository, jwtSecret string, mailer services.OrderEmailSender) *OrderHandler {
+type MarkGroupsSeenRequest struct {
+	GroupKeys []string `json:"groupKeys" binding:"required"`
+}
+
+func NewOrderHandler(repo *models.OrderRepository, unreadRepo *models.OrderUnreadRepository, userRepo *models.UserRepository, jwtSecret string, mailer services.OrderEmailSender, hub *realtime.Hub) *OrderHandler {
 	return &OrderHandler{
-		repo:      repo,
-		userRepo:  userRepo,
-		jwtSecret: []byte(jwtSecret),
-		mailer:    mailer,
+		repo:       repo,
+		unreadRepo: unreadRepo,
+		userRepo:   userRepo,
+		jwtSecret:  []byte(jwtSecret),
+		mailer:     mailer,
+		hub:        hub,
 	}
 }
 
@@ -100,11 +110,14 @@ func (h *OrderHandler) CreateForecastOrders(c *gin.Context) {
 
 	inputs := make([]models.CreatePendingOrderInput, 0, len(req.Items))
 	approvalTime := time.Now().Format(time.RFC3339)
+	createdGroupKeys := make([]string, 0, len(req.Items))
 	for _, item := range req.Items {
 		if item.DotGoiHang < 1 {
 			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "dotGoiHang must be greater than 0"})
 			return
 		}
+
+		groupKey := buildPendingOrderGroupKey(item.NhaThau, approvalTime)
 
 		inputs = append(inputs, models.CreatePendingOrderInput{
 			NhaThau:      sanitizeText(item.NhaThau),
@@ -118,15 +131,24 @@ func (h *OrderHandler) CreateForecastOrders(c *gin.Context) {
 			DotGoiHang:   item.DotGoiHang,
 			Email:        sanitizeText(item.Email),
 			Source:       models.OrderSourceForecast,
+			GroupKey:     groupKey,
 			Approver:     &models.OrderActor{ID: currentUser.ID, Username: currentUser.Username, Email: currentUser.Email},
 			CreatedBy:    models.OrderActor{ID: currentUser.ID, Username: currentUser.Username, Email: currentUser.Email},
 			ApprovalTime: approvalTime,
 		})
+		createdGroupKeys = append(createdGroupKeys, groupKey)
 	}
 
 	if err := h.repo.AddForecastOrders(inputs); err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
 		return
+	}
+
+	if h.hub != nil {
+		h.hub.Broadcast("orders.new_pending", gin.H{
+			"groupKeys": uniqueNonEmptyStrings(createdGroupKeys),
+			"createdAt": approvalTime,
+		})
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
@@ -241,6 +263,88 @@ func (h *OrderHandler) PlaceOrders(c *gin.Context) {
 	})
 }
 
+func (h *OrderHandler) GetUnreadSnapshot(c *gin.Context) {
+	if h.unreadRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "UNAVAILABLE", Message: "Unread repository is not configured"})
+		return
+	}
+
+	currentUser, err := h.getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	snapshot, err := h.unreadRepo.GetUnreadSnapshot(currentUser.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": snapshot})
+}
+
+func (h *OrderHandler) MarkSupplierAlertSeen(c *gin.Context) {
+	if h.unreadRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "UNAVAILABLE", Message: "Unread repository is not configured"})
+		return
+	}
+
+	currentUser, err := h.getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	now := time.Now().UTC()
+	if err := h.unreadRepo.MarkSupplierAlertSeen(currentUser.ID, now); err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	h.pushUnreadSnapshot(currentUser.ID)
+	c.JSON(http.StatusOK, gin.H{"message": "Supplier alert marked as seen"})
+}
+
+func (h *OrderHandler) MarkGroupsSeen(c *gin.Context) {
+	if h.unreadRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "UNAVAILABLE", Message: "Unread repository is not configured"})
+		return
+	}
+
+	currentUser, err := h.getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	var req MarkGroupsSeenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "Invalid group seen payload"})
+		return
+	}
+
+	if len(req.GroupKeys) == 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "groupKeys is required"})
+		return
+	}
+
+	groupKeys := uniqueNonEmptyStrings(req.GroupKeys)
+	if len(groupKeys) == 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "groupKeys is required"})
+		return
+	}
+
+	now := time.Now().UTC()
+	if err := h.unreadRepo.MarkGroupsSeen(currentUser.ID, groupKeys, now); err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	h.pushUnreadSnapshot(currentUser.ID)
+	c.JSON(http.StatusOK, gin.H{"message": "Groups marked as seen", "count": len(groupKeys)})
+}
+
 func (h *OrderHandler) sendPlacedOrderEmails(orders []models.PendingOrder) error {
 	if h.mailer == nil {
 		return fmt.Errorf("email sender is not configured")
@@ -274,11 +378,11 @@ func (h *OrderHandler) sendPlacedOrderEmails(orders []models.PendingOrder) error
 		}
 
 		group.items = append(group.items, services.OrderEmailItem{
-			Index:       len(group.items) + 1,
-			TenVatTu:    strings.TrimSpace(order.TenVtytBv),
-			MaVatTu:     strings.TrimSpace(order.MaVtytCu),
-			DonViTinh:   strings.TrimSpace(order.DonViTinh),
-			SoLuong:     order.DotGoiHang,
+			Index:     len(group.items) + 1,
+			TenVatTu:  strings.TrimSpace(order.TenVtytBv),
+			MaVatTu:   strings.TrimSpace(order.MaVtytCu),
+			DonViTinh: strings.TrimSpace(order.DonViTinh),
+			SoLuong:   order.DotGoiHang,
 		})
 		groups[key] = group
 	}
@@ -361,4 +465,43 @@ func countUniqueOrderIDs(orderIDs []int64) int {
 		set[orderID] = struct{}{}
 	}
 	return len(set)
+}
+
+func buildPendingOrderGroupKey(nhaThau, approvalTime string) string {
+	normalizedCompany := strings.ToLower(strings.TrimSpace(nhaThau))
+	if normalizedCompany == "" {
+		normalizedCompany = "unknown"
+	}
+	return fmt.Sprintf("%s__%s", normalizedCompany, strings.TrimSpace(approvalTime))
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalized := strings.TrimSpace(value)
+		if normalized == "" {
+			continue
+		}
+		set[normalized] = struct{}{}
+	}
+
+	result := make([]string, 0, len(set))
+	for value := range set {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func (h *OrderHandler) pushUnreadSnapshot(userID int64) {
+	if h.unreadRepo == nil || h.hub == nil {
+		return
+	}
+
+	snapshot, err := h.unreadRepo.GetUnreadSnapshot(userID)
+	if err != nil {
+		return
+	}
+
+	h.hub.SendToUser(userID, "orders.unread_updated", snapshot)
 }
