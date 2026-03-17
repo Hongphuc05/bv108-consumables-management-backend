@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"bv108-consumables-management-backend/internal/models"
+	"bv108-consumables-management-backend/internal/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -16,6 +17,7 @@ type OrderHandler struct {
 	repo      *models.OrderRepository
 	userRepo  *models.UserRepository
 	jwtSecret []byte
+	mailer    services.OrderEmailSender
 }
 
 type CreateForecastOrdersRequest struct {
@@ -39,11 +41,12 @@ type PlaceOrdersRequest struct {
 	OrderIDs []int64 `json:"orderIds" binding:"required"`
 }
 
-func NewOrderHandler(repo *models.OrderRepository, userRepo *models.UserRepository, jwtSecret string) *OrderHandler {
+func NewOrderHandler(repo *models.OrderRepository, userRepo *models.UserRepository, jwtSecret string, mailer services.OrderEmailSender) *OrderHandler {
 	return &OrderHandler{
 		repo:      repo,
 		userRepo:  userRepo,
 		jwtSecret: []byte(jwtSecret),
+		mailer:    mailer,
 	}
 }
 
@@ -196,6 +199,27 @@ func (h *OrderHandler) PlaceOrders(c *gin.Context) {
 		return
 	}
 
+	pendingOrders, err := h.repo.GetPendingOrdersByIDs(req.OrderIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	if len(pendingOrders) == 0 {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "No pending orders found"})
+		return
+	}
+
+	if countUniqueOrderIDs(req.OrderIDs) != len(pendingOrders) {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "Some pending orders were not found"})
+		return
+	}
+
+	if err := h.sendPlacedOrderEmails(pendingOrders); err != nil {
+		c.JSON(http.StatusBadGateway, ErrorResponse{Error: "EMAIL_SEND_ERROR", Message: err.Error()})
+		return
+	}
+
 	placedCount, err := h.repo.PlaceOrders(req.OrderIDs, models.OrderActor{
 		ID:       currentUser.ID,
 		Username: currentUser.Username,
@@ -212,9 +236,60 @@ func (h *OrderHandler) PlaceOrders(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":     "Orders placed successfully",
+		"message":     "Orders placed and email sent successfully",
 		"placedCount": placedCount,
 	})
+}
+
+func (h *OrderHandler) sendPlacedOrderEmails(orders []models.PendingOrder) error {
+	if h.mailer == nil {
+		return fmt.Errorf("email sender is not configured")
+	}
+
+	type emailGroup struct {
+		supplierName string
+		email        string
+		items        []services.OrderEmailItem
+	}
+
+	groups := make(map[string]emailGroup)
+	for _, order := range orders {
+		email := strings.TrimSpace(order.Email)
+		supplierName := strings.TrimSpace(order.NhaThau)
+		if email == "" {
+			if supplierName == "" {
+				return fmt.Errorf("missing company email")
+			}
+			return fmt.Errorf("missing company email for %s", supplierName)
+		}
+
+		key := strings.ToLower(email) + "|" + strings.ToLower(supplierName)
+		group, exists := groups[key]
+		if !exists {
+			group = emailGroup{
+				supplierName: supplierName,
+				email:        email,
+				items:        make([]services.OrderEmailItem, 0, 4),
+			}
+		}
+
+		group.items = append(group.items, services.OrderEmailItem{
+			Index:       len(group.items) + 1,
+			TenVatTu:    strings.TrimSpace(order.TenVtytBv),
+			MaVatTu:     strings.TrimSpace(order.MaVtytCu),
+			DonViTinh:   strings.TrimSpace(order.DonViTinh),
+			SoLuong:     order.DotGoiHang,
+		})
+		groups[key] = group
+	}
+
+	for _, group := range groups {
+		if err := h.mailer.SendPlacedOrderEmail(group.email, group.supplierName, group.items); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (h *OrderHandler) getCurrentUser(c *gin.Context) (*models.UserProfile, error) {
@@ -278,4 +353,12 @@ func (h *OrderHandler) getUserIDFromAuthorizationHeader(c *gin.Context) (int64, 
 
 func sanitizeText(value string) string {
 	return strings.TrimSpace(value)
+}
+
+func countUniqueOrderIDs(orderIDs []int64) int {
+	set := make(map[int64]struct{}, len(orderIDs))
+	for _, orderID := range orderIDs {
+		set[orderID] = struct{}{}
+	}
+	return len(set)
 }

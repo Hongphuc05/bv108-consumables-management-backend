@@ -19,24 +19,25 @@ type OrderActor struct {
 }
 
 type PendingOrder struct {
-	ID                 int64  `json:"id"`
-	NhaThau            string `json:"nhaThau"`
-	MaQuanLy           string `json:"maQuanLy"`
-	MaVtytCu           string `json:"maVtytCu"`
-	TenVtytBv          string `json:"tenVtytBv"`
-	MaHieu             string `json:"maHieu"`
-	HangSx             string `json:"hangSx"`
-	DonViTinh          string `json:"donViTinh"`
-	QuyCach            string `json:"quyCach"`
-	DotGoiHang         int    `json:"dotGoiHang"`
-	Email              string `json:"email,omitempty"`
-	Source             string `json:"source"`
-	NguoiPheDuyet      string `json:"nguoiPheDuyet,omitempty"`
+	ID               int64  `json:"id"`
+	CompanyContactID *int64 `json:"companyContactId,omitempty"`
+	NhaThau          string `json:"nhaThau"`
+	MaQuanLy         string `json:"maQuanLy"`
+	MaVtytCu         string `json:"maVtytCu"`
+	TenVtytBv        string `json:"tenVtytBv"`
+	MaHieu           string `json:"maHieu"`
+	HangSx           string `json:"hangSx"`
+	DonViTinh        string `json:"donViTinh"`
+	QuyCach          string `json:"quyCach"`
+	DotGoiHang       int    `json:"dotGoiHang"`
+	Email            string `json:"email,omitempty"`
+	Source           string `json:"source"`
+	NguoiPheDuyet    string `json:"nguoiPheDuyet,omitempty"`
 	NguoiPheDuyetEmail string `json:"nguoiPheDuyetEmail,omitempty"`
-	ThoiGianPheDuyet   string `json:"thoiGianPheDuyet,omitempty"`
-	NguoiTaoDon        string `json:"nguoiTaoDon,omitempty"`
-	NguoiTaoDonEmail   string `json:"nguoiTaoDonEmail,omitempty"`
-	NgayTao            string `json:"ngayTao,omitempty"`
+	ThoiGianPheDuyet string `json:"thoiGianPheDuyet,omitempty"`
+	NguoiTaoDon      string `json:"nguoiTaoDon,omitempty"`
+	NguoiTaoDonEmail string `json:"nguoiTaoDonEmail,omitempty"`
+	NgayTao          string `json:"ngayTao,omitempty"`
 }
 
 type OrderHistoryRecord struct {
@@ -78,6 +79,7 @@ func (r *OrderRepository) EnsureSchema() error {
 		`
 		CREATE TABLE IF NOT EXISTS pending_orders (
 			id BIGINT NOT NULL AUTO_INCREMENT,
+			company_contact_id BIGINT NULL,
 			nha_thau VARCHAR(255) NOT NULL,
 			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
 			ma_vtyt_cu VARCHAR(255) NOT NULL,
@@ -86,7 +88,7 @@ func (r *OrderRepository) EnsureSchema() error {
 			hang_sx VARCHAR(255) NOT NULL DEFAULT '',
 			don_vi_tinh VARCHAR(100) NOT NULL DEFAULT '',
 			quy_cach VARCHAR(255) NOT NULL DEFAULT '',
-			dot_goi_hang INT NOT NULL,
+			so_luong INT NOT NULL,
 			email VARCHAR(255) NOT NULL DEFAULT '',
 			source VARCHAR(50) NOT NULL,
 			nguoi_phe_duyet_id BIGINT NULL,
@@ -99,6 +101,7 @@ func (r *OrderRepository) EnsureSchema() error {
 			ngay_tao VARCHAR(64) NOT NULL,
 			updated_at VARCHAR(64) NOT NULL,
 			PRIMARY KEY (id),
+			KEY idx_pending_orders_company_contact (company_contact_id),
 			KEY idx_pending_orders_created_at (updated_at, id),
 			KEY idx_pending_orders_source_code (source, ma_vtyt_cu)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -107,6 +110,7 @@ func (r *OrderRepository) EnsureSchema() error {
 		CREATE TABLE IF NOT EXISTS order_history (
 			id BIGINT NOT NULL AUTO_INCREMENT,
 			pending_order_id BIGINT NULL,
+			company_contact_id BIGINT NULL,
 			nha_thau VARCHAR(255) NOT NULL,
 			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
 			ma_vtyt_cu VARCHAR(255) NOT NULL,
@@ -115,7 +119,7 @@ func (r *OrderRepository) EnsureSchema() error {
 			hang_sx VARCHAR(255) NOT NULL DEFAULT '',
 			don_vi_tinh VARCHAR(100) NOT NULL DEFAULT '',
 			quy_cach VARCHAR(255) NOT NULL DEFAULT '',
-			dot_goi_hang INT NOT NULL,
+			so_luong INT NOT NULL,
 			email VARCHAR(255) NOT NULL DEFAULT '',
 			source VARCHAR(50) NOT NULL,
 			nguoi_phe_duyet_id BIGINT NULL,
@@ -133,6 +137,7 @@ func (r *OrderRepository) EnsureSchema() error {
 			nguoi_dat_hang VARCHAR(255) NOT NULL,
 			nguoi_dat_hang_email VARCHAR(255) NOT NULL DEFAULT '',
 			PRIMARY KEY (id),
+			KEY idx_order_history_company_contact (company_contact_id),
 			KEY idx_order_history_ngay_dat_hang (ngay_dat_hang, id),
 			KEY idx_order_history_ma_quan_ly (ma_quan_ly)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -145,6 +150,14 @@ func (r *OrderRepository) EnsureSchema() error {
 		}
 	}
 
+	if err := r.ensureQuantityColumn("pending_orders"); err != nil {
+		return err
+	}
+
+	if err := r.ensureQuantityColumn("order_history"); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -152,6 +165,7 @@ func (r *OrderRepository) ListPendingOrders() ([]PendingOrder, error) {
 	rows, err := r.DB.Query(`
 		SELECT
 			id,
+			company_contact_id,
 			nha_thau,
 			ma_quan_ly,
 			ma_vtyt_cu,
@@ -160,7 +174,7 @@ func (r *OrderRepository) ListPendingOrders() ([]PendingOrder, error) {
 			hang_sx,
 			don_vi_tinh,
 			quy_cach,
-			dot_goi_hang,
+			so_luong,
 			email,
 			source,
 			nguoi_phe_duyet,
@@ -180,8 +194,10 @@ func (r *OrderRepository) ListPendingOrders() ([]PendingOrder, error) {
 	orders := make([]PendingOrder, 0)
 	for rows.Next() {
 		var order PendingOrder
+		var companyContactID sql.NullInt64
 		if err := rows.Scan(
 			&order.ID,
+			&companyContactID,
 			&order.NhaThau,
 			&order.MaQuanLy,
 			&order.MaVtytCu,
@@ -202,6 +218,10 @@ func (r *OrderRepository) ListPendingOrders() ([]PendingOrder, error) {
 		); err != nil {
 			return nil, fmt.Errorf("error scanning pending order: %w", err)
 		}
+		if companyContactID.Valid {
+			value := companyContactID.Int64
+			order.CompanyContactID = &value
+		}
 		orders = append(orders, order)
 	}
 
@@ -212,10 +232,21 @@ func (r *OrderRepository) ListPendingOrders() ([]PendingOrder, error) {
 	return orders, nil
 }
 
-func (r *OrderRepository) ListOrderHistory() ([]OrderHistoryRecord, error) {
-	rows, err := r.DB.Query(`
+func (r *OrderRepository) GetPendingOrdersByIDs(orderIDs []int64) ([]PendingOrder, error) {
+	if len(orderIDs) == 0 {
+		return []PendingOrder{}, nil
+	}
+
+	placeholders := makePlaceholders(len(orderIDs))
+	args := make([]interface{}, len(orderIDs))
+	for index, orderID := range orderIDs {
+		args[index] = orderID
+	}
+
+	rows, err := r.DB.Query(fmt.Sprintf(`
 		SELECT
 			id,
+			company_contact_id,
 			nha_thau,
 			ma_quan_ly,
 			ma_vtyt_cu,
@@ -224,7 +255,79 @@ func (r *OrderRepository) ListOrderHistory() ([]OrderHistoryRecord, error) {
 			hang_sx,
 			don_vi_tinh,
 			quy_cach,
-			dot_goi_hang,
+			so_luong,
+			email,
+			source,
+			nguoi_phe_duyet,
+			nguoi_phe_duyet_email,
+			thoi_gian_phe_duyet,
+			nguoi_tao_don,
+			nguoi_tao_don_email,
+			ngay_tao
+		FROM pending_orders
+		WHERE id IN (%s)
+		ORDER BY updated_at DESC, id DESC
+	`, placeholders), args...)
+	if err != nil {
+		return nil, fmt.Errorf("error listing pending orders by ids: %w", err)
+	}
+	defer rows.Close()
+
+	orders := make([]PendingOrder, 0, len(orderIDs))
+	for rows.Next() {
+		var order PendingOrder
+		var companyContactID sql.NullInt64
+		if err := rows.Scan(
+			&order.ID,
+			&companyContactID,
+			&order.NhaThau,
+			&order.MaQuanLy,
+			&order.MaVtytCu,
+			&order.TenVtytBv,
+			&order.MaHieu,
+			&order.HangSx,
+			&order.DonViTinh,
+			&order.QuyCach,
+			&order.DotGoiHang,
+			&order.Email,
+			&order.Source,
+			&order.NguoiPheDuyet,
+			&order.NguoiPheDuyetEmail,
+			&order.ThoiGianPheDuyet,
+			&order.NguoiTaoDon,
+			&order.NguoiTaoDonEmail,
+			&order.NgayTao,
+		); err != nil {
+			return nil, fmt.Errorf("error scanning pending order by id: %w", err)
+		}
+		if companyContactID.Valid {
+			value := companyContactID.Int64
+			order.CompanyContactID = &value
+		}
+		orders = append(orders, order)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating pending orders by ids: %w", err)
+	}
+
+	return orders, nil
+}
+
+func (r *OrderRepository) ListOrderHistory() ([]OrderHistoryRecord, error) {
+	rows, err := r.DB.Query(`
+		SELECT
+			id,
+			company_contact_id,
+			nha_thau,
+			ma_quan_ly,
+			ma_vtyt_cu,
+			ten_vtyt_bv,
+			ma_hieu,
+			hang_sx,
+			don_vi_tinh,
+			quy_cach,
+			so_luong,
 			email,
 			source,
 			nguoi_phe_duyet,
@@ -249,9 +352,11 @@ func (r *OrderRepository) ListOrderHistory() ([]OrderHistoryRecord, error) {
 	history := make([]OrderHistoryRecord, 0)
 	for rows.Next() {
 		var item OrderHistoryRecord
+		var companyContactID sql.NullInt64
 		var emailSent int
 		if err := rows.Scan(
 			&item.ID,
+			&companyContactID,
 			&item.NhaThau,
 			&item.MaQuanLy,
 			&item.MaVtytCu,
@@ -277,6 +382,10 @@ func (r *OrderRepository) ListOrderHistory() ([]OrderHistoryRecord, error) {
 		); err != nil {
 			return nil, fmt.Errorf("error scanning order history: %w", err)
 		}
+		if companyContactID.Valid {
+			value := companyContactID.Int64
+			item.CompanyContactID = &value
+		}
 		item.EmailSent = emailSent == 1
 		history = append(history, item)
 	}
@@ -301,10 +410,16 @@ func (r *OrderRepository) AddForecastOrders(inputs []CreatePendingOrderInput) er
 
 	for _, input := range inputs {
 		now := currentTimestamp()
+		contactRepo := NewCompanyContactRepository(r.DB)
+		companyContactID, resolvedEmail, err := contactRepo.EnsureContactTx(tx, input.NhaThau, "", input.Email)
+		if err != nil {
+			return fmt.Errorf("error resolving company contact: %w", err)
+		}
+
 		var existingID int64
 		var existingQty int
-		err := tx.QueryRow(`
-			SELECT id, dot_goi_hang
+		err = tx.QueryRow(`
+			SELECT id, so_luong
 			FROM pending_orders
 			WHERE source = ? AND ma_vtyt_cu = ?
 			LIMIT 1
@@ -336,7 +451,8 @@ func (r *OrderRepository) AddForecastOrders(inputs []CreatePendingOrderInput) er
 				hang_sx = ?,
 				don_vi_tinh = ?,
 				quy_cach = ?,
-				dot_goi_hang = ?,
+				so_luong = ?,
+				company_contact_id = ?,
 				email = ?,
 				nguoi_phe_duyet_id = ?,
 				nguoi_phe_duyet = ?,
@@ -356,7 +472,8 @@ func (r *OrderRepository) AddForecastOrders(inputs []CreatePendingOrderInput) er
 			input.DonViTinh,
 			input.QuyCach,
 			updatedQty,
-			input.Email,
+			nullInt64ToValue(companyContactID),
+			resolvedEmail,
 			approverID,
 			approverName,
 			approverEmail,
@@ -416,6 +533,7 @@ func (r *OrderRepository) PlaceOrders(orderIDs []int64, placedBy OrderActor) (in
 	query := fmt.Sprintf(`
 		SELECT
 			id,
+			company_contact_id,
 			nha_thau,
 			ma_quan_ly,
 			ma_vtyt_cu,
@@ -424,7 +542,7 @@ func (r *OrderRepository) PlaceOrders(orderIDs []int64, placedBy OrderActor) (in
 			hang_sx,
 			don_vi_tinh,
 			quy_cach,
-			dot_goi_hang,
+			so_luong,
 			email,
 			source,
 			nguoi_phe_duyet_id,
@@ -448,6 +566,7 @@ func (r *OrderRepository) PlaceOrders(orderIDs []int64, placedBy OrderActor) (in
 
 	type pendingOrderRow struct {
 		ID                  int64
+		CompanyContactID    sql.NullInt64
 		NhaThau             string
 		MaQuanLy            string
 		MaVtytCu            string
@@ -474,6 +593,7 @@ func (r *OrderRepository) PlaceOrders(orderIDs []int64, placedBy OrderActor) (in
 		var order pendingOrderRow
 		if err := rows.Scan(
 			&order.ID,
+			&order.CompanyContactID,
 			&order.NhaThau,
 			&order.MaQuanLy,
 			&order.MaVtytCu,
@@ -512,6 +632,7 @@ func (r *OrderRepository) PlaceOrders(orderIDs []int64, placedBy OrderActor) (in
 		if _, err := tx.Exec(`
 			INSERT INTO order_history (
 				pending_order_id,
+				company_contact_id,
 				nha_thau,
 				ma_quan_ly,
 				ma_vtyt_cu,
@@ -520,7 +641,7 @@ func (r *OrderRepository) PlaceOrders(orderIDs []int64, placedBy OrderActor) (in
 				hang_sx,
 				don_vi_tinh,
 				quy_cach,
-				dot_goi_hang,
+				so_luong,
 				email,
 				source,
 				nguoi_phe_duyet_id,
@@ -538,9 +659,10 @@ func (r *OrderRepository) PlaceOrders(orderIDs []int64, placedBy OrderActor) (in
 				nguoi_dat_hang,
 				nguoi_dat_hang_email
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			order.ID,
+			nullInt64ToValue(order.CompanyContactID),
 			order.NhaThau,
 			order.MaQuanLy,
 			order.MaVtytCu,
@@ -587,9 +709,15 @@ func (r *OrderRepository) insertPendingOrderTx(tx *sql.Tx, input CreatePendingOr
 	approverID := nullableInt64(input.Approver)
 	approverName := nullableActorField(input.Approver, func(actor *OrderActor) string { return actor.Username })
 	approverEmail := nullableActorField(input.Approver, func(actor *OrderActor) string { return actor.Email })
+	contactRepo := NewCompanyContactRepository(r.DB)
+	companyContactID, resolvedEmail, err := contactRepo.EnsureContactTx(tx, input.NhaThau, "", input.Email)
+	if err != nil {
+		return fmt.Errorf("error resolving company contact for pending order: %w", err)
+	}
 
 	if _, err := tx.Exec(`
 		INSERT INTO pending_orders (
+			company_contact_id,
 			nha_thau,
 			ma_quan_ly,
 			ma_vtyt_cu,
@@ -598,7 +726,7 @@ func (r *OrderRepository) insertPendingOrderTx(tx *sql.Tx, input CreatePendingOr
 			hang_sx,
 			don_vi_tinh,
 			quy_cach,
-			dot_goi_hang,
+			so_luong,
 			email,
 			source,
 			nguoi_phe_duyet_id,
@@ -611,8 +739,9 @@ func (r *OrderRepository) insertPendingOrderTx(tx *sql.Tx, input CreatePendingOr
 			ngay_tao,
 			updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
+		nullInt64ToValue(companyContactID),
 		input.NhaThau,
 		input.MaQuanLy,
 		input.MaVtytCu,
@@ -622,7 +751,7 @@ func (r *OrderRepository) insertPendingOrderTx(tx *sql.Tx, input CreatePendingOr
 		input.DonViTinh,
 		input.QuyCach,
 		input.DotGoiHang,
-		input.Email,
+		resolvedEmail,
 		input.Source,
 		approverID,
 		approverName,
@@ -638,6 +767,74 @@ func (r *OrderRepository) insertPendingOrderTx(tx *sql.Tx, input CreatePendingOr
 	}
 
 	return nil
+}
+
+func (r *OrderRepository) ensureQuantityColumn(tableName string) error {
+	exists, err := r.tableExists(tableName)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	hasQuantityColumn, err := r.columnExists(tableName, "so_luong")
+	if err != nil {
+		return err
+	}
+	if hasQuantityColumn {
+		return nil
+	}
+
+	hasLegacyColumn, err := r.columnExists(tableName, "dot_goi_hang")
+	if err != nil {
+		return err
+	}
+
+	var statement string
+	if hasLegacyColumn {
+		statement = fmt.Sprintf(
+			"ALTER TABLE %s CHANGE COLUMN dot_goi_hang so_luong INT NOT NULL",
+			tableName,
+		)
+	} else {
+		statement = fmt.Sprintf(
+			"ALTER TABLE %s ADD COLUMN so_luong INT NOT NULL DEFAULT 0 AFTER quy_cach",
+			tableName,
+		)
+	}
+
+	if _, err := r.DB.Exec(statement); err != nil {
+		return fmt.Errorf("error ensuring %s.so_luong: %w", tableName, err)
+	}
+
+	return nil
+}
+
+func (r *OrderRepository) tableExists(tableName string) (bool, error) {
+	var count int
+	if err := r.DB.QueryRow(`
+		SELECT COUNT(*)
+		FROM information_schema.tables
+		WHERE table_schema = DATABASE() AND table_name = ?
+	`, tableName).Scan(&count); err != nil {
+		return false, fmt.Errorf("error checking table %s: %w", tableName, err)
+	}
+
+	return count > 0, nil
+}
+
+func (r *OrderRepository) columnExists(tableName, columnName string) (bool, error) {
+	var count int
+	if err := r.DB.QueryRow(`
+		SELECT COUNT(*)
+		FROM information_schema.columns
+		WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?
+	`, tableName, columnName).Scan(&count); err != nil {
+		return false, fmt.Errorf("error checking column %s.%s: %w", tableName, columnName, err)
+	}
+
+	return count > 0, nil
 }
 
 func currentTimestamp() string {
