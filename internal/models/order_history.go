@@ -19,51 +19,55 @@ type OrderActor struct {
 }
 
 type PendingOrder struct {
-	ID               int64  `json:"id"`
-	CompanyContactID *int64 `json:"companyContactId,omitempty"`
-	NhaThau          string `json:"nhaThau"`
-	MaQuanLy         string `json:"maQuanLy"`
-	MaVtytCu         string `json:"maVtytCu"`
-	TenVtytBv        string `json:"tenVtytBv"`
-	MaHieu           string `json:"maHieu"`
-	HangSx           string `json:"hangSx"`
-	DonViTinh        string `json:"donViTinh"`
-	QuyCach          string `json:"quyCach"`
-	DotGoiHang       int    `json:"dotGoiHang"`
-	Email            string `json:"email,omitempty"`
-	Source           string `json:"source"`
-	NguoiPheDuyet    string `json:"nguoiPheDuyet,omitempty"`
+	ID                 int64  `json:"id"`
+	CompanyContactID   *int64 `json:"companyContactId,omitempty"`
+	NhaThau            string `json:"nhaThau"`
+	MaQuanLy           string `json:"maQuanLy"`
+	MaVtytCu           string `json:"maVtytCu"`
+	TenVtytBv          string `json:"tenVtytBv"`
+	MaHieu             string `json:"maHieu"`
+	HangSx             string `json:"hangSx"`
+	DonViTinh          string `json:"donViTinh"`
+	QuyCach            string `json:"quyCach"`
+	DotGoiHang         int    `json:"dotGoiHang"`
+	Email              string `json:"email,omitempty"`
+	Source             string `json:"source"`
+	GroupKey           string `json:"groupKey,omitempty"`
+	NguoiPheDuyet      string `json:"nguoiPheDuyet,omitempty"`
 	NguoiPheDuyetEmail string `json:"nguoiPheDuyetEmail,omitempty"`
-	ThoiGianPheDuyet string `json:"thoiGianPheDuyet,omitempty"`
-	NguoiTaoDon      string `json:"nguoiTaoDon,omitempty"`
-	NguoiTaoDonEmail string `json:"nguoiTaoDonEmail,omitempty"`
-	NgayTao          string `json:"ngayTao,omitempty"`
+	ThoiGianPheDuyet   string `json:"thoiGianPheDuyet,omitempty"`
+	NguoiTaoDon        string `json:"nguoiTaoDon,omitempty"`
+	NguoiTaoDonEmail   string `json:"nguoiTaoDonEmail,omitempty"`
+	NgayTao            string `json:"ngayTao,omitempty"`
+	CreatedAtTS        string `json:"createdAtTs,omitempty"`
+	UpdatedAtTS        string `json:"updatedAtTs,omitempty"`
 }
 
 type OrderHistoryRecord struct {
 	PendingOrder
-	NgayDatHang        string `json:"ngayDatHang"`
-	TrangThai          string `json:"trangThai"`
-	EmailSent          bool   `json:"emailSent"`
-	NguoiDatHang       string `json:"nguoiDatHang"`
-	NguoiDatHangEmail  string `json:"nguoiDatHangEmail,omitempty"`
+	NgayDatHang       string `json:"ngayDatHang"`
+	TrangThai         string `json:"trangThai"`
+	EmailSent         bool   `json:"emailSent"`
+	NguoiDatHang      string `json:"nguoiDatHang"`
+	NguoiDatHangEmail string `json:"nguoiDatHangEmail,omitempty"`
 }
 
 type CreatePendingOrderInput struct {
-	NhaThau          string
-	MaQuanLy         string
-	MaVtytCu         string
-	TenVtytBv        string
-	MaHieu           string
-	HangSx           string
-	DonViTinh        string
-	QuyCach          string
-	DotGoiHang       int
-	Email            string
-	Source           string
-	Approver         *OrderActor
-	CreatedBy        OrderActor
-	ApprovalTime     string
+	NhaThau      string
+	MaQuanLy     string
+	MaVtytCu     string
+	TenVtytBv    string
+	MaHieu       string
+	HangSx       string
+	DonViTinh    string
+	QuyCach      string
+	DotGoiHang   int
+	Email        string
+	Source       string
+	GroupKey     string
+	Approver     *OrderActor
+	CreatedBy    OrderActor
+	ApprovalTime string
 }
 
 type OrderRepository struct {
@@ -91,6 +95,7 @@ func (r *OrderRepository) EnsureSchema() error {
 			so_luong INT NOT NULL,
 			email VARCHAR(255) NOT NULL DEFAULT '',
 			source VARCHAR(50) NOT NULL,
+			group_key VARCHAR(255) NOT NULL DEFAULT '',
 			nguoi_phe_duyet_id BIGINT NULL,
 			nguoi_phe_duyet VARCHAR(255) NOT NULL DEFAULT '',
 			nguoi_phe_duyet_email VARCHAR(255) NOT NULL DEFAULT '',
@@ -100,10 +105,13 @@ func (r *OrderRepository) EnsureSchema() error {
 			nguoi_tao_don_email VARCHAR(255) NOT NULL DEFAULT '',
 			ngay_tao VARCHAR(64) NOT NULL,
 			updated_at VARCHAR(64) NOT NULL,
+			created_at_ts DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at_ts DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 			PRIMARY KEY (id),
 			KEY idx_pending_orders_company_contact (company_contact_id),
 			KEY idx_pending_orders_created_at (updated_at, id),
-			KEY idx_pending_orders_source_code (source, ma_vtyt_cu)
+			KEY idx_pending_orders_source_code (source, ma_vtyt_cu),
+			KEY idx_pending_orders_group_key (group_key)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 		`,
 		`
@@ -154,8 +162,52 @@ func (r *OrderRepository) EnsureSchema() error {
 		return err
 	}
 
+	if err := r.ensurePendingRealtimeColumns(); err != nil {
+		return err
+	}
+
 	if err := r.ensureQuantityColumn("order_history"); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (r *OrderRepository) ensurePendingRealtimeColumns() error {
+	tableName := "pending_orders"
+
+	type realtimeColumn struct {
+		name      string
+		statement string
+	}
+
+	columns := []realtimeColumn{
+		{
+			name:      "group_key",
+			statement: "ALTER TABLE pending_orders ADD COLUMN group_key VARCHAR(255) NOT NULL DEFAULT '' AFTER source",
+		},
+		{
+			name:      "created_at_ts",
+			statement: "ALTER TABLE pending_orders ADD COLUMN created_at_ts DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER updated_at",
+		},
+		{
+			name:      "updated_at_ts",
+			statement: "ALTER TABLE pending_orders ADD COLUMN updated_at_ts DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at_ts",
+		},
+	}
+
+	for _, column := range columns {
+		exists, err := r.columnExists(tableName, column.name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+
+		if _, err := r.DB.Exec(column.statement); err != nil {
+			return fmt.Errorf("error ensuring %s.%s: %w", tableName, column.name, err)
+		}
 	}
 
 	return nil
@@ -177,12 +229,15 @@ func (r *OrderRepository) ListPendingOrders() ([]PendingOrder, error) {
 			so_luong,
 			email,
 			source,
+			group_key,
 			nguoi_phe_duyet,
 			nguoi_phe_duyet_email,
 			thoi_gian_phe_duyet,
 			nguoi_tao_don,
 			nguoi_tao_don_email,
-			ngay_tao
+			ngay_tao,
+			DATE_FORMAT(created_at_ts, '%Y-%m-%dT%H:%i:%sZ') AS created_at_ts,
+			DATE_FORMAT(updated_at_ts, '%Y-%m-%dT%H:%i:%sZ') AS updated_at_ts
 		FROM pending_orders
 		ORDER BY updated_at DESC, id DESC
 	`)
@@ -209,12 +264,15 @@ func (r *OrderRepository) ListPendingOrders() ([]PendingOrder, error) {
 			&order.DotGoiHang,
 			&order.Email,
 			&order.Source,
+			&order.GroupKey,
 			&order.NguoiPheDuyet,
 			&order.NguoiPheDuyetEmail,
 			&order.ThoiGianPheDuyet,
 			&order.NguoiTaoDon,
 			&order.NguoiTaoDonEmail,
 			&order.NgayTao,
+			&order.CreatedAtTS,
+			&order.UpdatedAtTS,
 		); err != nil {
 			return nil, fmt.Errorf("error scanning pending order: %w", err)
 		}
@@ -258,12 +316,15 @@ func (r *OrderRepository) GetPendingOrdersByIDs(orderIDs []int64) ([]PendingOrde
 			so_luong,
 			email,
 			source,
+			group_key,
 			nguoi_phe_duyet,
 			nguoi_phe_duyet_email,
 			thoi_gian_phe_duyet,
 			nguoi_tao_don,
 			nguoi_tao_don_email,
-			ngay_tao
+			ngay_tao,
+			DATE_FORMAT(created_at_ts, '%%Y-%%m-%%dT%%H:%%i:%%sZ') AS created_at_ts,
+			DATE_FORMAT(updated_at_ts, '%%Y-%%m-%%dT%%H:%%i:%%sZ') AS updated_at_ts
 		FROM pending_orders
 		WHERE id IN (%s)
 		ORDER BY updated_at DESC, id DESC
@@ -291,12 +352,15 @@ func (r *OrderRepository) GetPendingOrdersByIDs(orderIDs []int64) ([]PendingOrde
 			&order.DotGoiHang,
 			&order.Email,
 			&order.Source,
+			&order.GroupKey,
 			&order.NguoiPheDuyet,
 			&order.NguoiPheDuyetEmail,
 			&order.ThoiGianPheDuyet,
 			&order.NguoiTaoDon,
 			&order.NguoiTaoDonEmail,
 			&order.NgayTao,
+			&order.CreatedAtTS,
+			&order.UpdatedAtTS,
 		); err != nil {
 			return nil, fmt.Errorf("error scanning pending order by id: %w", err)
 		}
@@ -410,81 +474,8 @@ func (r *OrderRepository) AddForecastOrders(inputs []CreatePendingOrderInput) er
 
 	for _, input := range inputs {
 		now := currentTimestamp()
-		contactRepo := NewCompanyContactRepository(r.DB)
-		companyContactID, resolvedEmail, err := contactRepo.EnsureContactTx(tx, input.NhaThau, "", input.Email)
-		if err != nil {
-			return fmt.Errorf("error resolving company contact: %w", err)
-		}
-
-		var existingID int64
-		var existingQty int
-		err = tx.QueryRow(`
-			SELECT id, so_luong
-			FROM pending_orders
-			WHERE source = ? AND ma_vtyt_cu = ?
-			LIMIT 1
-		`, OrderSourceForecast, input.MaVtytCu).Scan(&existingID, &existingQty)
-
-		if err != nil && err != sql.ErrNoRows {
-			return fmt.Errorf("error checking existing forecast order: %w", err)
-		}
-
-		if err == sql.ErrNoRows {
-			if err := r.insertPendingOrderTx(tx, input, now); err != nil {
-				return err
-			}
-			continue
-		}
-
-		updatedQty := existingQty + input.DotGoiHang
-		approverID := nullableInt64(input.Approver)
-		approverName := nullableActorField(input.Approver, func(actor *OrderActor) string { return actor.Username })
-		approverEmail := nullableActorField(input.Approver, func(actor *OrderActor) string { return actor.Email })
-
-		if _, err := tx.Exec(`
-			UPDATE pending_orders
-			SET
-				nha_thau = ?,
-				ma_quan_ly = ?,
-				ten_vtyt_bv = ?,
-				ma_hieu = ?,
-				hang_sx = ?,
-				don_vi_tinh = ?,
-				quy_cach = ?,
-				so_luong = ?,
-				company_contact_id = ?,
-				email = ?,
-				nguoi_phe_duyet_id = ?,
-				nguoi_phe_duyet = ?,
-				nguoi_phe_duyet_email = ?,
-				thoi_gian_phe_duyet = ?,
-				nguoi_tao_don_id = ?,
-				nguoi_tao_don = ?,
-				nguoi_tao_don_email = ?,
-				updated_at = ?
-			WHERE id = ?
-		`,
-			input.NhaThau,
-			input.MaQuanLy,
-			input.TenVtytBv,
-			input.MaHieu,
-			input.HangSx,
-			input.DonViTinh,
-			input.QuyCach,
-			updatedQty,
-			nullInt64ToValue(companyContactID),
-			resolvedEmail,
-			approverID,
-			approverName,
-			approverEmail,
-			input.ApprovalTime,
-			input.CreatedBy.ID,
-			input.CreatedBy.Username,
-			input.CreatedBy.Email,
-			now,
-			existingID,
-		); err != nil {
-			return fmt.Errorf("error updating forecast order: %w", err)
+		if err := r.insertPendingOrderTx(tx, input, now); err != nil {
+			return err
 		}
 	}
 
@@ -565,27 +556,27 @@ func (r *OrderRepository) PlaceOrders(orderIDs []int64, placedBy OrderActor) (in
 	defer rows.Close()
 
 	type pendingOrderRow struct {
-		ID                  int64
-		CompanyContactID    sql.NullInt64
-		NhaThau             string
-		MaQuanLy            string
-		MaVtytCu            string
-		TenVtytBv           string
-		MaHieu              string
-		HangSx              string
-		DonViTinh           string
-		QuyCach             string
-		DotGoiHang          int
-		Email               string
-		Source              string
-		NguoiPheDuyetID     sql.NullInt64
-		NguoiPheDuyet       string
-		NguoiPheDuyetEmail  string
-		ThoiGianPheDuyet    string
-		NguoiTaoDonID       sql.NullInt64
-		NguoiTaoDon         string
-		NguoiTaoDonEmail    string
-		NgayTao             string
+		ID                 int64
+		CompanyContactID   sql.NullInt64
+		NhaThau            string
+		MaQuanLy           string
+		MaVtytCu           string
+		TenVtytBv          string
+		MaHieu             string
+		HangSx             string
+		DonViTinh          string
+		QuyCach            string
+		DotGoiHang         int
+		Email              string
+		Source             string
+		NguoiPheDuyetID    sql.NullInt64
+		NguoiPheDuyet      string
+		NguoiPheDuyetEmail string
+		ThoiGianPheDuyet   string
+		NguoiTaoDonID      sql.NullInt64
+		NguoiTaoDon        string
+		NguoiTaoDonEmail   string
+		NgayTao            string
 	}
 
 	selectedOrders := make([]pendingOrderRow, 0, len(orderIDs))
@@ -729,6 +720,7 @@ func (r *OrderRepository) insertPendingOrderTx(tx *sql.Tx, input CreatePendingOr
 			so_luong,
 			email,
 			source,
+			group_key,
 			nguoi_phe_duyet_id,
 			nguoi_phe_duyet,
 			nguoi_phe_duyet_email,
@@ -737,9 +729,11 @@ func (r *OrderRepository) insertPendingOrderTx(tx *sql.Tx, input CreatePendingOr
 			nguoi_tao_don,
 			nguoi_tao_don_email,
 			ngay_tao,
-			updated_at
+			updated_at,
+			created_at_ts,
+			updated_at_ts
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
 	`,
 		nullInt64ToValue(companyContactID),
 		input.NhaThau,
@@ -753,6 +747,7 @@ func (r *OrderRepository) insertPendingOrderTx(tx *sql.Tx, input CreatePendingOr
 		input.DotGoiHang,
 		resolvedEmail,
 		input.Source,
+		input.GroupKey,
 		approverID,
 		approverName,
 		approverEmail,
