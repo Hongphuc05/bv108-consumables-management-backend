@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -69,30 +70,51 @@ func (h *WSHandler) getUserIDFromRequest(c *gin.Context) (int64, error) {
 		return 0, fmt.Errorf("missing bearer token")
 	}
 
+	log.Printf("[WS] Token received (length: %d, first 50chars: %s)", len(tokenString), tokenString[:min(50, len(tokenString))])
+
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
+		// Check if the signing method is HS256
+		if token.Method.Alg() != "HS256" {
+			log.Printf("[WS] ERROR: Wrong signing method: %s", token.Method.Alg())
+			return nil, fmt.Errorf("unexpected signing method: %s", token.Method.Alg())
 		}
 		return h.jwtSecret, nil
 	})
-	if err != nil || !token.Valid {
-		return 0, fmt.Errorf("invalid or expired token")
+	if err != nil {
+		log.Printf("[WS] ERROR: JWT parse failed: %v", err)
+		return 0, fmt.Errorf("invalid token: %w", err)
 	}
+	if !token.Valid {
+		log.Printf("[WS] ERROR: Token is invalid (valid=%v)", token.Valid)
+		return 0, fmt.Errorf("token is not valid")
+	}
+	log.Printf("[WS] Token parsed successfully")
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
+		log.Printf("[WS] ERROR: Claims type assertion failed")
 		return 0, fmt.Errorf("invalid token claims")
 	}
 
 	subValue, exists := claims["sub"]
 	if !exists {
+		log.Printf("[WS] ERROR: Missing 'sub' claim in token")
 		return 0, fmt.Errorf("missing subject in token")
 	}
 
 	userID, err := convertClaimToInt64(subValue)
 	if err != nil {
+		log.Printf("[WS] ERROR: Failed to convert sub to int64: %v", err)
 		return 0, fmt.Errorf("invalid subject in token")
 	}
 
+	log.Printf("[WS] User ID extracted: %d", userID)
 	return userID, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
