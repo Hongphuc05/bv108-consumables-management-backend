@@ -389,6 +389,130 @@ func (r *InvoiceReconciliationRepository) ListMatchedInvoiceNumbers(month, year 
 	return invoiceNumbers, nil
 }
 
+func (r *InvoiceReconciliationRepository) ListAllMatchedReconciliations() ([]InvoiceReconciliationRecord, error) {
+	rows, err := r.DB.Query(`
+		SELECT
+			id,
+			order_history_id,
+			order_batch_key,
+			company_contact_id,
+			nha_thau,
+			ma_quan_ly,
+			ma_vtyt_cu,
+			ten_vtyt_bv,
+			ordered_qty,
+			order_time,
+			invoice_number,
+			invoice_id_hoa_don,
+			invoice_row_id,
+			invoice_company_contact_id,
+			invoice_company_name,
+			invoice_item_code,
+			invoice_item_name,
+			invoice_qty,
+			invoice_time,
+			has_invoice,
+			detail_status,
+			detail_note,
+			match_score,
+			quantity_diff,
+			matched_by_user_id,
+			matched_by_username,
+			matched_by_email,
+			matched_at,
+			created_at,
+			updated_at
+		FROM order_invoice_reconciliation
+		WHERE has_invoice = 1
+		ORDER BY matched_at DESC, id DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("error listing matched invoice reconciliations: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]InvoiceReconciliationRecord, 0)
+	for rows.Next() {
+		var item InvoiceReconciliationRecord
+		var companyContactID sql.NullInt64
+		var orderTime sql.NullTime
+		var invoiceRowID sql.NullInt64
+		var invoiceCompanyContactID sql.NullInt64
+		var invoiceTime sql.NullTime
+		var hasInvoice int
+		var matchedByUserID sql.NullInt64
+
+		if err := rows.Scan(
+			&item.ID,
+			&item.OrderHistoryID,
+			&item.OrderBatchKey,
+			&companyContactID,
+			&item.NhaThau,
+			&item.MaQuanLy,
+			&item.MaVtytCu,
+			&item.TenVtytBv,
+			&item.OrderedQty,
+			&orderTime,
+			&item.InvoiceNumber,
+			&item.InvoiceIDHoaDon,
+			&invoiceRowID,
+			&invoiceCompanyContactID,
+			&item.InvoiceCompanyName,
+			&item.InvoiceItemCode,
+			&item.InvoiceItemName,
+			&item.InvoiceQty,
+			&invoiceTime,
+			&hasInvoice,
+			&item.DetailStatus,
+			&item.DetailNote,
+			&item.MatchScore,
+			&item.QuantityDiff,
+			&matchedByUserID,
+			&item.MatchedByUsername,
+			&item.MatchedByEmail,
+			&item.MatchedAt,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("error scanning matched invoice reconciliation: %w", err)
+		}
+
+		if companyContactID.Valid {
+			value := companyContactID.Int64
+			item.CompanyContactID = &value
+		}
+		if orderTime.Valid {
+			value := orderTime.Time
+			item.OrderTime = &value
+		}
+		if invoiceRowID.Valid {
+			value := invoiceRowID.Int64
+			item.InvoiceRowID = &value
+		}
+		if invoiceCompanyContactID.Valid {
+			value := invoiceCompanyContactID.Int64
+			item.InvoiceCompanyContactID = &value
+		}
+		if invoiceTime.Valid {
+			value := invoiceTime.Time
+			item.InvoiceTime = &value
+		}
+		item.HasInvoice = hasInvoice == 1
+		if matchedByUserID.Valid {
+			value := matchedByUserID.Int64
+			item.MatchedByUserID = &value
+		}
+
+		records = append(records, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating matched invoice reconciliation history: %w", err)
+	}
+
+	return records, nil
+}
+
 func (r *InvoiceReconciliationRepository) ListAllMatchedInvoiceNumbers() ([]string, error) {
 	rows, err := r.DB.Query(`
 		SELECT DISTINCT invoice_number

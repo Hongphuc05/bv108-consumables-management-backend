@@ -134,6 +134,7 @@ func main() {
 			orders.GET("/history", orderHandler.GetOrderHistory)
 			orders.GET("/invoice-reconciliations", orderHandler.GetInvoiceReconciliationHistory)
 			orders.GET("/invoice-reconciliations/matched-invoices", orderHandler.GetMatchedInvoiceNumbers)
+			orders.GET("/invoice-reconciliations/matched-orders", orderHandler.GetMatchedOrderReconciliations)
 			orders.GET("/company-contacts/search", orderHandler.SearchCompanyContacts)
 			orders.GET("/unread-snapshot", orderHandler.GetUnreadSnapshot)
 			orders.POST("/pending/forecast", orderHandler.CreateForecastOrders)

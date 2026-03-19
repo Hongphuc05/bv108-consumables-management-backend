@@ -272,6 +272,26 @@ func (h *OrderHandler) GetMatchedInvoiceNumbers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": invoiceNumbers, "month": month, "year": year})
 }
 
+func (h *OrderHandler) GetMatchedOrderReconciliations(c *gin.Context) {
+	if h.invoiceMatchRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "UNAVAILABLE", Message: "Invoice reconciliation repository is not configured"})
+		return
+	}
+
+	if _, err := h.getCurrentUser(c); err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	records, err := h.invoiceMatchRepo.ListAllMatchedReconciliations()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": records})
+}
+
 func (h *OrderHandler) SearchCompanyContacts(c *gin.Context) {
 	if h.companyContactRepo == nil {
 		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "UNAVAILABLE", Message: "Company contact repository is not configured"})
