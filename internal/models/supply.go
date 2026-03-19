@@ -227,8 +227,8 @@ func (r *SupplyRepository) SearchByName(keyword string, page, pageSize int) ([]S
 
 	// Get total count
 	var total int
-	countQuery := "SELECT COUNT(*) FROM supplies WHERE NAME LIKE ? OR ID LIKE ?"
-	err := r.DB.QueryRow(countQuery, searchPattern, searchPattern).Scan(&total)
+	countQuery := "SELECT COUNT(*) FROM supplies WHERE NAME LIKE ? OR ID LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?"
+	err := r.DB.QueryRow(countQuery, searchPattern, searchPattern, searchPattern, searchPattern).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error counting supplies: %w", err)
 	}
@@ -240,12 +240,12 @@ func (r *SupplyRepository) SearchByName(keyword string, page, pageSize int) ([]S
 			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
 			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
 		FROM supplies
-		WHERE NAME LIKE ? OR ID LIKE ?
+		WHERE NAME LIKE ? OR ID LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?
 		ORDER BY IDX1
 		LIMIT ? OFFSET ?
 	`
 
-	rows, err := r.DB.Query(query, searchPattern, searchPattern, pageSize, offset)
+	rows, err := r.DB.Query(query, searchPattern, searchPattern, searchPattern, searchPattern, pageSize, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error searching supplies: %w", err)
 	}

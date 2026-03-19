@@ -64,7 +64,7 @@ func main() {
 	)
 	realtimeHub := realtime.NewHub()
 	wsHandler := handlers.NewWSHandler(userRepo, config.AppConfig.JWTSecret, realtimeHub)
-	orderHandler := handlers.NewOrderHandler(orderRepo, orderUnreadRepo, userRepo, config.AppConfig.JWTSecret, orderMailer, realtimeHub)
+	orderHandler := handlers.NewOrderHandler(orderRepo, orderUnreadRepo, companyContactRepo, userRepo, config.AppConfig.JWTSecret, orderMailer, realtimeHub)
 	forecastApprovalRepo := models.NewForecastApprovalRepository(database.DB)
 	if err := forecastApprovalRepo.EnsureSchema(); err != nil {
 		log.Fatal("Failed to initialize forecast approval schema:", err)
@@ -128,6 +128,7 @@ func main() {
 		{
 			orders.GET("/pending", orderHandler.GetPendingOrders)
 			orders.GET("/history", orderHandler.GetOrderHistory)
+			orders.GET("/company-contacts/search", orderHandler.SearchCompanyContacts)
 			orders.GET("/unread-snapshot", orderHandler.GetUnreadSnapshot)
 			orders.POST("/pending/forecast", orderHandler.CreateForecastOrders)
 			orders.POST("/pending/manual", orderHandler.CreateManualOrder)
