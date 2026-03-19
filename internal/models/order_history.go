@@ -45,6 +45,7 @@ type PendingOrder struct {
 
 type OrderHistoryRecord struct {
 	PendingOrder
+	OrderBatchKey     string `json:"orderBatchKey,omitempty"`
 	NgayDatHang       string `json:"ngayDatHang"`
 	TrangThai         string `json:"trangThai"`
 	EmailSent         bool   `json:"emailSent"`
@@ -458,7 +459,50 @@ func (r *OrderRepository) ListOrderHistory() ([]OrderHistoryRecord, error) {
 		return nil, fmt.Errorf("error iterating order history: %w", err)
 	}
 
+	assignOrderBatchKeys(history)
+
 	return history, nil
+}
+
+func assignOrderBatchKeys(history []OrderHistoryRecord) {
+	if len(history) == 0 {
+		return
+	}
+
+	batchSequence := 0
+	lastSignature := ""
+
+	for index := range history {
+		signature := buildOrderBatchSignature(history[index])
+		if signature != lastSignature {
+			batchSequence++
+			lastSignature = signature
+		}
+
+		history[index].OrderBatchKey = fmt.Sprintf("%s__batch-%d", signature, batchSequence)
+	}
+}
+
+func buildOrderBatchSignature(item OrderHistoryRecord) string {
+	companyKey := buildOrderCompanyKey(item)
+	ngayDatHangKey := strings.TrimSpace(item.NgayDatHang)
+	if ngayDatHangKey == "" {
+		ngayDatHangKey = "unknown-time"
+	}
+	return fmt.Sprintf("%s__%s", companyKey, ngayDatHangKey)
+}
+
+func buildOrderCompanyKey(item OrderHistoryRecord) string {
+	if item.CompanyContactID != nil {
+		return fmt.Sprintf("cc-%d", *item.CompanyContactID)
+	}
+
+	name := strings.TrimSpace(strings.ToLower(item.NhaThau))
+	name = strings.Join(strings.Fields(name), " ")
+	if name == "" {
+		return "unknown-company"
+	}
+	return name
 }
 
 func (r *OrderRepository) AddForecastOrders(inputs []CreatePendingOrderInput) error {

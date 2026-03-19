@@ -41,6 +41,10 @@ func main() {
 	if err := orderRepo.EnsureSchema(); err != nil {
 		log.Fatal("Failed to initialize order history schema:", err)
 	}
+	invoiceMatchRepo := models.NewInvoiceReconciliationRepository(database.DB)
+	if err := invoiceMatchRepo.EnsureSchema(); err != nil {
+		log.Fatal("Failed to initialize invoice reconciliation schema:", err)
+	}
 	orderUnreadRepo := models.NewOrderUnreadRepository(database.DB)
 	if err := orderUnreadRepo.EnsureSchema(); err != nil {
 		log.Fatal("Failed to initialize unread schema:", err)
@@ -64,7 +68,7 @@ func main() {
 	)
 	realtimeHub := realtime.NewHub()
 	wsHandler := handlers.NewWSHandler(userRepo, config.AppConfig.JWTSecret, realtimeHub)
-	orderHandler := handlers.NewOrderHandler(orderRepo, orderUnreadRepo, companyContactRepo, userRepo, config.AppConfig.JWTSecret, orderMailer, realtimeHub)
+	orderHandler := handlers.NewOrderHandler(orderRepo, invoiceMatchRepo, orderUnreadRepo, companyContactRepo, userRepo, config.AppConfig.JWTSecret, orderMailer, realtimeHub)
 	forecastApprovalRepo := models.NewForecastApprovalRepository(database.DB)
 	if err := forecastApprovalRepo.EnsureSchema(); err != nil {
 		log.Fatal("Failed to initialize forecast approval schema:", err)
@@ -128,11 +132,14 @@ func main() {
 		{
 			orders.GET("/pending", orderHandler.GetPendingOrders)
 			orders.GET("/history", orderHandler.GetOrderHistory)
+			orders.GET("/invoice-reconciliations", orderHandler.GetInvoiceReconciliationHistory)
+			orders.GET("/invoice-reconciliations/matched-invoices", orderHandler.GetMatchedInvoiceNumbers)
 			orders.GET("/company-contacts/search", orderHandler.SearchCompanyContacts)
 			orders.GET("/unread-snapshot", orderHandler.GetUnreadSnapshot)
 			orders.POST("/pending/forecast", orderHandler.CreateForecastOrders)
 			orders.POST("/pending/manual", orderHandler.CreateManualOrder)
 			orders.POST("/place", orderHandler.PlaceOrders)
+			orders.POST("/invoice-reconciliations/bulk", orderHandler.SaveInvoiceReconciliations)
 			orders.POST("/alerts/suppliers/seen", orderHandler.MarkSupplierAlertSeen)
 			orders.POST("/groups/seen", orderHandler.MarkGroupsSeen)
 		}
