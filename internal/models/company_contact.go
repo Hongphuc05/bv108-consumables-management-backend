@@ -249,9 +249,9 @@ func (r *CompanyContactRepository) backfillOrderTableTx(tx *sql.Tx, tableName st
 	}
 
 	type orderRow struct {
-		ID        int64
-		Company   string
-		Email     string
+		ID      int64
+		Company string
+		Email   string
 	}
 
 	records := make([]orderRow, 0)
@@ -434,4 +434,53 @@ func buildCompanyIdentityKey(companyName, taxID string) string {
 	}
 
 	return ""
+}
+
+func (r *CompanyContactRepository) Search(keyword string, limit int) ([]CompanyContact, error) {
+	trimmedKeyword := strings.TrimSpace(keyword)
+	if trimmedKeyword == "" {
+		return []CompanyContact{}, nil
+	}
+
+	if limit <= 0 {
+		limit = 8
+	}
+	if limit > 20 {
+		limit = 20
+	}
+
+	searchPattern := "%" + trimmedKeyword + "%"
+	query := `
+		SELECT id, identity_key, company_name, tax_id, email
+		FROM company_contacts
+		WHERE company_name LIKE ? OR tax_id LIKE ?
+		ORDER BY company_name ASC
+		LIMIT ?
+	`
+
+	rows, err := r.DB.Query(query, searchPattern, searchPattern, limit)
+	if err != nil {
+		return nil, fmt.Errorf("error searching company contacts: %w", err)
+	}
+	defer rows.Close()
+
+	contacts := make([]CompanyContact, 0)
+	for rows.Next() {
+		var contact CompanyContact
+		if err := rows.Scan(&contact.ID, &contact.IdentityKey, &contact.CompanyName, &contact.TaxID, &contact.Email); err != nil {
+			return nil, fmt.Errorf("error scanning company contact: %w", err)
+		}
+
+		if contact.Email == "" {
+			contact.Email = DefaultCompanyContactEmail
+		}
+
+		contacts = append(contacts, contact)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating company contacts: %w", err)
+	}
+
+	return contacts, nil
 }

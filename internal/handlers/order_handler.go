@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,12 +17,13 @@ import (
 )
 
 type OrderHandler struct {
-	repo       *models.OrderRepository
-	unreadRepo *models.OrderUnreadRepository
-	userRepo   *models.UserRepository
-	jwtSecret  []byte
-	mailer     services.OrderEmailSender
-	hub        *realtime.Hub
+	repo               *models.OrderRepository
+	unreadRepo         *models.OrderUnreadRepository
+	companyContactRepo *models.CompanyContactRepository
+	userRepo           *models.UserRepository
+	jwtSecret          []byte
+	mailer             services.OrderEmailSender
+	hub                *realtime.Hub
 }
 
 type CreateForecastOrdersRequest struct {
@@ -49,15 +51,50 @@ type MarkGroupsSeenRequest struct {
 	GroupKeys []string `json:"groupKeys" binding:"required"`
 }
 
-func NewOrderHandler(repo *models.OrderRepository, unreadRepo *models.OrderUnreadRepository, userRepo *models.UserRepository, jwtSecret string, mailer services.OrderEmailSender, hub *realtime.Hub) *OrderHandler {
+func NewOrderHandler(repo *models.OrderRepository, unreadRepo *models.OrderUnreadRepository, companyContactRepo *models.CompanyContactRepository, userRepo *models.UserRepository, jwtSecret string, mailer services.OrderEmailSender, hub *realtime.Hub) *OrderHandler {
 	return &OrderHandler{
-		repo:       repo,
-		unreadRepo: unreadRepo,
-		userRepo:   userRepo,
-		jwtSecret:  []byte(jwtSecret),
-		mailer:     mailer,
-		hub:        hub,
+		repo:               repo,
+		unreadRepo:         unreadRepo,
+		companyContactRepo: companyContactRepo,
+		userRepo:           userRepo,
+		jwtSecret:          []byte(jwtSecret),
+		mailer:             mailer,
+		hub:                hub,
 	}
+}
+
+func (h *OrderHandler) SearchCompanyContacts(c *gin.Context) {
+	if h.companyContactRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "UNAVAILABLE", Message: "Company contact repository is not configured"})
+		return
+	}
+
+	if _, err := h.getCurrentUser(c); err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	if keyword == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "keyword is required"})
+		return
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "8"))
+	if limit < 1 {
+		limit = 8
+	}
+	if limit > 20 {
+		limit = 20
+	}
+
+	contacts, err := h.companyContactRepo.Search(keyword, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": contacts})
 }
 
 func (h *OrderHandler) GetPendingOrders(c *gin.Context) {
