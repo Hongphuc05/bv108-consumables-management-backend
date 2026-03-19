@@ -18,6 +18,7 @@ import (
 
 type OrderHandler struct {
 	repo               *models.OrderRepository
+	invoiceMatchRepo   *models.InvoiceReconciliationRepository
 	unreadRepo         *models.OrderUnreadRepository
 	companyContactRepo *models.CompanyContactRepository
 	userRepo           *models.UserRepository
@@ -51,9 +52,41 @@ type MarkGroupsSeenRequest struct {
 	GroupKeys []string `json:"groupKeys" binding:"required"`
 }
 
-func NewOrderHandler(repo *models.OrderRepository, unreadRepo *models.OrderUnreadRepository, companyContactRepo *models.CompanyContactRepository, userRepo *models.UserRepository, jwtSecret string, mailer services.OrderEmailSender, hub *realtime.Hub) *OrderHandler {
+type SaveInvoiceReconciliationsBulkRequest struct {
+	Items []SaveInvoiceReconciliationItemRequest `json:"items" binding:"required"`
+}
+
+type SaveInvoiceReconciliationItemRequest struct {
+	OrderHistoryID          int64   `json:"orderHistoryId"`
+	OrderBatchKey           string  `json:"orderBatchKey"`
+	CompanyContactID        *int64  `json:"companyContactId"`
+	NhaThau                 string  `json:"nhaThau"`
+	MaQuanLy                string  `json:"maQuanLy"`
+	MaVtytCu                string  `json:"maVtytCu"`
+	TenVtytBv               string  `json:"tenVtytBv"`
+	OrderedQty              int     `json:"orderedQty"`
+	OrderTime               string  `json:"orderTime"`
+	InvoiceNumber           string  `json:"invoiceNumber"`
+	InvoiceIDHoaDon         string  `json:"invoiceIdHoaDon"`
+	InvoiceRowID            *int64  `json:"invoiceRowId"`
+	InvoiceCompanyContactID *int64  `json:"invoiceCompanyContactId"`
+	InvoiceCompanyName      string  `json:"invoiceCompanyName"`
+	InvoiceItemCode         string  `json:"invoiceItemCode"`
+	InvoiceItemName         string  `json:"invoiceItemName"`
+	InvoiceQty              float64 `json:"invoiceQty"`
+	InvoiceTime             string  `json:"invoiceTime"`
+	HasInvoice              bool    `json:"hasInvoice"`
+	DetailStatus            string  `json:"detailStatus"`
+	DetailNote              string  `json:"detailNote"`
+	MatchScore              float64 `json:"matchScore"`
+	QuantityDiff            float64 `json:"quantityDiff"`
+	MatchedAt               *string `json:"matchedAt"`
+}
+
+func NewOrderHandler(repo *models.OrderRepository, invoiceMatchRepo *models.InvoiceReconciliationRepository, unreadRepo *models.OrderUnreadRepository, companyContactRepo *models.CompanyContactRepository, userRepo *models.UserRepository, jwtSecret string, mailer services.OrderEmailSender, hub *realtime.Hub) *OrderHandler {
 	return &OrderHandler{
 		repo:               repo,
+		invoiceMatchRepo:   invoiceMatchRepo,
 		unreadRepo:         unreadRepo,
 		companyContactRepo: companyContactRepo,
 		userRepo:           userRepo,
@@ -61,6 +94,182 @@ func NewOrderHandler(repo *models.OrderRepository, unreadRepo *models.OrderUnrea
 		mailer:             mailer,
 		hub:                hub,
 	}
+}
+
+func (h *OrderHandler) SaveInvoiceReconciliations(c *gin.Context) {
+	if h.invoiceMatchRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "UNAVAILABLE", Message: "Invoice reconciliation repository is not configured"})
+		return
+	}
+
+	currentUser, err := h.getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	var req SaveInvoiceReconciliationsBulkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "Invalid invoice reconciliation payload"})
+		return
+	}
+
+	if len(req.Items) == 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "At least one reconciliation item is required"})
+		return
+	}
+
+	inputs := make([]models.UpsertInvoiceReconciliationInput, 0, len(req.Items))
+	for _, item := range req.Items {
+		if item.OrderHistoryID <= 0 {
+			continue
+		}
+
+		if !item.HasInvoice {
+			continue
+		}
+
+		invoiceNumber := strings.TrimSpace(item.InvoiceNumber)
+		if invoiceNumber == "" {
+			continue
+		}
+
+		matchedAt := time.Now().UTC()
+		if item.MatchedAt != nil {
+			if parsed, parsedOK := parseOptionalRFC3339(*item.MatchedAt); parsedOK {
+				matchedAt = parsed.UTC()
+			}
+		}
+
+		orderTime, _ := parseOptionalRFC3339(item.OrderTime)
+		invoiceTime, _ := parseOptionalRFC3339(item.InvoiceTime)
+
+		var matchedByUserID *int64
+		if currentUser.ID > 0 {
+			userID := currentUser.ID
+			matchedByUserID = &userID
+		}
+
+		inputs = append(inputs, models.UpsertInvoiceReconciliationInput{
+			OrderHistoryID:          item.OrderHistoryID,
+			OrderBatchKey:           strings.TrimSpace(item.OrderBatchKey),
+			CompanyContactID:        item.CompanyContactID,
+			NhaThau:                 sanitizeText(item.NhaThau),
+			MaQuanLy:                sanitizeText(item.MaQuanLy),
+			MaVtytCu:                sanitizeText(item.MaVtytCu),
+			TenVtytBv:               sanitizeText(item.TenVtytBv),
+			OrderedQty:              item.OrderedQty,
+			OrderTime:               orderTime,
+			InvoiceNumber:           invoiceNumber,
+			InvoiceIDHoaDon:         sanitizeText(item.InvoiceIDHoaDon),
+			InvoiceRowID:            item.InvoiceRowID,
+			InvoiceCompanyContactID: item.InvoiceCompanyContactID,
+			InvoiceCompanyName:      sanitizeText(item.InvoiceCompanyName),
+			InvoiceItemCode:         sanitizeText(item.InvoiceItemCode),
+			InvoiceItemName:         sanitizeText(item.InvoiceItemName),
+			InvoiceQty:              item.InvoiceQty,
+			InvoiceTime:             invoiceTime,
+			HasInvoice:              item.HasInvoice,
+			DetailStatus:            sanitizeText(item.DetailStatus),
+			DetailNote:              sanitizeText(item.DetailNote),
+			MatchScore:              item.MatchScore,
+			QuantityDiff:            item.QuantityDiff,
+			MatchedByUserID:         matchedByUserID,
+			MatchedByUsername:       currentUser.Username,
+			MatchedByEmail:          currentUser.Email,
+			MatchedAt:               matchedAt,
+		})
+	}
+
+	if len(inputs) == 0 {
+		c.JSON(http.StatusOK, gin.H{"message": "No valid invoice reconciliation items to save", "count": 0})
+		return
+	}
+
+	if err := h.invoiceMatchRepo.UpsertBulk(inputs); err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Invoice reconciliation history saved", "count": len(inputs)})
+}
+
+func (h *OrderHandler) GetInvoiceReconciliationHistory(c *gin.Context) {
+	if h.invoiceMatchRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "UNAVAILABLE", Message: "Invoice reconciliation repository is not configured"})
+		return
+	}
+
+	if _, err := h.getCurrentUser(c); err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	month, err := strconv.Atoi(c.DefaultQuery("month", strconv.Itoa(int(time.Now().Month()))))
+	if err != nil || month < 1 || month > 12 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "month must be from 1 to 12"})
+		return
+	}
+
+	year, err := strconv.Atoi(c.DefaultQuery("year", strconv.Itoa(time.Now().Year())))
+	if err != nil || year < 2000 || year > 3000 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "year is invalid"})
+		return
+	}
+
+	records, err := h.invoiceMatchRepo.ListByMonthYear(month, year)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": records, "month": month, "year": year})
+}
+
+func (h *OrderHandler) GetMatchedInvoiceNumbers(c *gin.Context) {
+	if h.invoiceMatchRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "UNAVAILABLE", Message: "Invoice reconciliation repository is not configured"})
+		return
+	}
+
+	if _, err := h.getCurrentUser(c); err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	allParam := strings.TrimSpace(c.Query("all"))
+	if allParam != "" {
+		if parsed, err := strconv.ParseBool(allParam); err == nil && parsed {
+			invoiceNumbers, err := h.invoiceMatchRepo.ListAllMatchedInvoiceNumbers()
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"data": invoiceNumbers, "all": true})
+			return
+		}
+	}
+
+	month, err := strconv.Atoi(c.DefaultQuery("month", strconv.Itoa(int(time.Now().Month()))))
+	if err != nil || month < 1 || month > 12 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "month must be from 1 to 12"})
+		return
+	}
+
+	year, err := strconv.Atoi(c.DefaultQuery("year", strconv.Itoa(time.Now().Year())))
+	if err != nil || year < 2000 || year > 3000 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "year is invalid"})
+		return
+	}
+
+	invoiceNumbers, err := h.invoiceMatchRepo.ListMatchedInvoiceNumbers(month, year)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": invoiceNumbers, "month": month, "year": year})
 }
 
 func (h *OrderHandler) SearchCompanyContacts(c *gin.Context) {
@@ -528,6 +737,20 @@ func uniqueNonEmptyStrings(values []string) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+func parseOptionalRFC3339(value string) (*time.Time, bool) {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return nil, false
+	}
+
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil, false
+	}
+
+	return &parsed, true
 }
 
 func (h *OrderHandler) pushUnreadSnapshot(userID int64) {
