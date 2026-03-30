@@ -348,7 +348,7 @@ func (r *ForecastApprovalRepository) ListChangeHistory(limit int) ([]ForecastCha
 			du_tru_sua,
 			nguoi_thuc_hien,
 			nguoi_thuc_hien_email,
-			DATE_FORMAT(thoi_gian_thuc_hien, '%Y-%m-%dT%H:%i:%sZ')
+			DATE_FORMAT(thoi_gian_thuc_hien, '%Y-%m-%dT%H:%i:%s')
 		FROM forecast_change_history
 		ORDER BY thoi_gian_thuc_hien DESC, id DESC
 		LIMIT ?
@@ -413,7 +413,7 @@ func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonth
 			h.du_tru_goc,
 			h.du_tru_sua,
 			h.nguoi_thuc_hien,
-			DATE_FORMAT(h.thoi_gian_thuc_hien, '%Y-%m-%dT%H:%i:%sZ'),
+			DATE_FORMAT(h.thoi_gian_thuc_hien, '%Y-%m-%dT%H:%i:%s'),
 			COALESCE(s.QUY_CACH_DONG_GOI, ''),
 			COALESCE(s.UNIT, ''),
 			COALESCE(s.PRICE, 0)
