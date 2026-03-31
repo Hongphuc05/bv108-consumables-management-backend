@@ -109,15 +109,16 @@ func main() {
 
 		supplies := api.Group("/supplies")
 		{
-			supplies.GET("", supplyHandler.GetAllSupplies)                    // GET /api/supplies?page=1&pageSize=20
-			supplies.GET("/search", supplyHandler.SearchSupplies)             // GET /api/supplies/search?keyword=xxx
-			supplies.GET("/groups", supplyHandler.GetAllGroups)               // GET /api/supplies/groups
-			supplies.GET("/group", supplyHandler.GetSuppliesByGroup)          // GET /api/supplies/group?groupName=xxx
-			supplies.GET("/low-stock", supplyHandler.GetLowStockSupplies)     // GET /api/supplies/low-stock?threshold=20
-			supplies.GET("/compare-groups", supplyHandler.GetCompareGroups)   // GET /api/supplies/compare-groups
-			supplies.GET("/compare-catalog", supplyHandler.GetCompareCatalog) // GET /api/supplies/compare-catalog?page=1&pageSize=20&keyword=xxx&groupFilter=yyy
-			supplies.POST("/compare", supplyHandler.CompareSupplies)          // POST /api/supplies/compare
-			supplies.GET("/:id", supplyHandler.GetSupplyByID)                 // GET /api/supplies/:id
+			supplies.GET("", supplyHandler.GetAllSupplies)                         // GET /api/supplies?page=1&pageSize=20
+			supplies.GET("/search", supplyHandler.SearchSupplies)                  // GET /api/supplies/search?keyword=xxx
+			supplies.GET("/groups", supplyHandler.GetAllGroups)                    // GET /api/supplies/groups
+			supplies.GET("/group", supplyHandler.GetSuppliesByGroup)               // GET /api/supplies/group?groupName=xxx
+			supplies.GET("/low-stock", supplyHandler.GetLowStockSupplies)          // GET /api/supplies/low-stock?threshold=20
+			supplies.GET("/compare-level1", supplyHandler.GetCompareLevel1Options) // GET /api/supplies/compare-level1
+			supplies.GET("/compare-level2", supplyHandler.GetCompareLevel2Options) // GET /api/supplies/compare-level2?level1=xxx
+			supplies.GET("/compare-catalog", supplyHandler.GetCompareCatalog)      // GET /api/supplies/compare-catalog?page=1&pageSize=20&keyword=xxx&level1Filter=xxx&level2Filter=yyy
+			supplies.POST("/compare", supplyHandler.CompareSupplies)               // POST /api/supplies/compare
+			supplies.GET("/:id", supplyHandler.GetSupplyByID)                      // GET /api/supplies/:id
 		}
 
 		hoaDon := api.Group("/hoa-don")

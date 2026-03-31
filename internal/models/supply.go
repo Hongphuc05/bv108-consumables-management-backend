@@ -395,21 +395,38 @@ func (r *SupplyRepository) GetLowStock(threshold int, page, pageSize int) ([]Sup
 	return supplies, total, nil
 }
 
-// GetCompareCatalog retrieves comparison catalog rows with pagination, keyword search, and ma_thong_tu_04 filtering.
-func (r *SupplyRepository) GetCompareCatalog(keyword string, groupFilter string, page, pageSize int) ([]CompareSupply, int, error) {
+// GetCompareCatalog retrieves comparison catalog rows with pagination, keyword search, and ma_thong_tu_04 level filtering.
+func (r *SupplyRepository) GetCompareCatalog(keyword string, level1Filter string, level2Filter string, page, pageSize int) ([]CompareSupply, int, error) {
 	offset := (page - 1) * pageSize
 	search := "%" + keyword + "%"
-	groupSearch := strings.TrimSpace(groupFilter)
+	level1Search := strings.TrimSpace(level1Filter)
+	level2Search := strings.TrimSpace(level2Filter)
 
 	countQuery := `
 		SELECT COUNT(*)
 		FROM so_sanh_vat_tu
 		WHERE (? = '' OR ma_thu_vien LIKE ? OR ten_vat_tu LIKE ? OR ten_cong_ty LIKE ? OR ma_thong_tu_04 LIKE ?)
-		  AND (? = '' OR TRIM(IFNULL(ma_thong_tu_04, '')) = ?)
+		  AND (? = '' OR (
+			LENGTH(TRIM(IFNULL(ma_thong_tu_04, ''))) > 4
+			AND SUBSTRING(TRIM(IFNULL(ma_thong_tu_04, '')), LENGTH(TRIM(IFNULL(ma_thong_tu_04, ''))) - 3, 1) = '.'
+			AND LEFT(TRIM(IFNULL(ma_thong_tu_04, '')), LENGTH(TRIM(IFNULL(ma_thong_tu_04, ''))) - 4) = ?
+		  ))
+		  AND (? = '' OR RIGHT(TRIM(IFNULL(ma_thong_tu_04, '')), 3) = ?)
 	`
 
 	var total int
-	err := r.DB.QueryRow(countQuery, keyword, search, search, search, search, groupSearch, groupSearch).Scan(&total)
+	err := r.DB.QueryRow(
+		countQuery,
+		keyword,
+		search,
+		search,
+		search,
+		search,
+		level1Search,
+		level1Search,
+		level2Search,
+		level2Search,
+	).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error counting compare catalog: %w", err)
 	}
@@ -427,12 +444,30 @@ func (r *SupplyRepository) GetCompareCatalog(keyword string, groupFilter string,
 			ma_5086, created_at, updated_at
 		FROM so_sanh_vat_tu
 		WHERE (? = '' OR ma_thu_vien LIKE ? OR ten_vat_tu LIKE ? OR ten_cong_ty LIKE ? OR ma_thong_tu_04 LIKE ?)
-		  AND (? = '' OR TRIM(IFNULL(ma_thong_tu_04, '')) = ?)
+		  AND (? = '' OR (
+			LENGTH(TRIM(IFNULL(ma_thong_tu_04, ''))) > 4
+			AND SUBSTRING(TRIM(IFNULL(ma_thong_tu_04, '')), LENGTH(TRIM(IFNULL(ma_thong_tu_04, ''))) - 3, 1) = '.'
+			AND LEFT(TRIM(IFNULL(ma_thong_tu_04, '')), LENGTH(TRIM(IFNULL(ma_thong_tu_04, ''))) - 4) = ?
+		  ))
+		  AND (? = '' OR RIGHT(TRIM(IFNULL(ma_thong_tu_04, '')), 3) = ?)
 		ORDER BY stt
 		LIMIT ? OFFSET ?
 	`
 
-	rows, err := r.DB.Query(query, keyword, search, search, search, search, groupSearch, groupSearch, pageSize, offset)
+	rows, err := r.DB.Query(
+		query,
+		keyword,
+		search,
+		search,
+		search,
+		search,
+		level1Search,
+		level1Search,
+		level2Search,
+		level2Search,
+		pageSize,
+		offset,
+	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error querying compare catalog: %w", err)
 	}
@@ -450,13 +485,14 @@ func (r *SupplyRepository) GetCompareCatalog(keyword string, groupFilter string,
 	return items, total, nil
 }
 
-// GetCompareGroups retrieves distinct non-empty ma_thong_tu_04 values for compare filtering.
-func (r *SupplyRepository) GetCompareGroups() ([]string, error) {
+// GetCompareLevel1Options retrieves distinct level 1 values from ma_thong_tu_04.
+func (r *SupplyRepository) GetCompareLevel1Options() ([]string, error) {
 	query := `
-		SELECT DISTINCT TRIM(ma_thong_tu_04) AS group_value
+		SELECT DISTINCT LEFT(TRIM(ma_thong_tu_04), LENGTH(TRIM(ma_thong_tu_04)) - 4) AS level1
 		FROM so_sanh_vat_tu
-		WHERE TRIM(IFNULL(ma_thong_tu_04, '')) <> ''
-		ORDER BY group_value
+		WHERE LENGTH(TRIM(IFNULL(ma_thong_tu_04, ''))) > 4
+		  AND SUBSTRING(TRIM(IFNULL(ma_thong_tu_04, '')), LENGTH(TRIM(IFNULL(ma_thong_tu_04, ''))) - 3, 1) = '.'
+		ORDER BY level1
 	`
 
 	rows, err := r.DB.Query(query)
@@ -469,12 +505,43 @@ func (r *SupplyRepository) GetCompareGroups() ([]string, error) {
 	for rows.Next() {
 		var group string
 		if err := rows.Scan(&group); err != nil {
-			return nil, fmt.Errorf("error scanning compare group: %w", err)
+			return nil, fmt.Errorf("error scanning compare level1 option: %w", err)
 		}
 		groups = append(groups, group)
 	}
 
 	return groups, nil
+}
+
+// GetCompareLevel2Options retrieves distinct level 2 values (last 3 chars) for a selected level 1.
+func (r *SupplyRepository) GetCompareLevel2Options(level1 string) ([]string, error) {
+	level1Search := strings.TrimSpace(level1)
+
+	query := `
+		SELECT DISTINCT RIGHT(TRIM(ma_thong_tu_04), 3) AS level2
+		FROM so_sanh_vat_tu
+		WHERE LENGTH(TRIM(IFNULL(ma_thong_tu_04, ''))) > 4
+		  AND SUBSTRING(TRIM(IFNULL(ma_thong_tu_04, '')), LENGTH(TRIM(IFNULL(ma_thong_tu_04, ''))) - 3, 1) = '.'
+		  AND (? = '' OR LEFT(TRIM(ma_thong_tu_04), LENGTH(TRIM(ma_thong_tu_04)) - 4) = ?)
+		ORDER BY level2
+	`
+
+	rows, err := r.DB.Query(query, level1Search, level1Search)
+	if err != nil {
+		return nil, fmt.Errorf("error querying compare level2 options: %w", err)
+	}
+	defer rows.Close()
+
+	level2Options := []string{}
+	for rows.Next() {
+		var level2 string
+		if err := rows.Scan(&level2); err != nil {
+			return nil, fmt.Errorf("error scanning compare level2 option: %w", err)
+		}
+		level2Options = append(level2Options, level2)
+	}
+
+	return level2Options, nil
 }
 
 // GetCompareByLibraryCodes retrieves comparison rows for selected library codes.

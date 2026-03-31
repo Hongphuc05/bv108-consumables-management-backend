@@ -290,7 +290,8 @@ func (h *SupplyHandler) GetLowStockSupplies(c *gin.Context) {
 // GetCompareCatalog returns paginated rows from so_sanh_vat_tu for selection list.
 func (h *SupplyHandler) GetCompareCatalog(c *gin.Context) {
 	keyword := strings.TrimSpace(c.Query("keyword"))
-	groupFilter := strings.TrimSpace(c.Query("groupFilter"))
+	level1Filter := strings.TrimSpace(c.Query("level1Filter"))
+	level2Filter := strings.TrimSpace(c.Query("level2Filter"))
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
 
@@ -301,7 +302,7 @@ func (h *SupplyHandler) GetCompareCatalog(c *gin.Context) {
 		pageSize = 20
 	}
 
-	items, total, err := h.repo.GetCompareCatalog(keyword, groupFilter, page, pageSize)
+	items, total, err := h.repo.GetCompareCatalog(keyword, level1Filter, level2Filter, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error:   "DATABASE_ERROR",
@@ -321,9 +322,27 @@ func (h *SupplyHandler) GetCompareCatalog(c *gin.Context) {
 	})
 }
 
-// GetCompareGroups returns distinct ma_thong_tu_04 values for compare filtering.
-func (h *SupplyHandler) GetCompareGroups(c *gin.Context) {
-	groups, err := h.repo.GetCompareGroups()
+// GetCompareLevel1Options returns distinct level 1 values from ma_thong_tu_04.
+func (h *SupplyHandler) GetCompareLevel1Options(c *gin.Context) {
+	groups, err := h.repo.GetCompareLevel1Options()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error:   "DATABASE_ERROR",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"groups": groups,
+		"total":  len(groups),
+	})
+}
+
+// GetCompareLevel2Options returns level 2 values (last 3 chars) from ma_thong_tu_04.
+func (h *SupplyHandler) GetCompareLevel2Options(c *gin.Context) {
+	level1 := strings.TrimSpace(c.Query("level1"))
+	groups, err := h.repo.GetCompareLevel2Options(level1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error:   "DATABASE_ERROR",
