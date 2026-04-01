@@ -11,6 +11,9 @@ import (
 type Hub struct {
 	mu      sync.RWMutex
 	clients map[int64]map[*Client]struct{}
+
+	historyMu       sync.RWMutex
+	activityHistory []activityHistoryItem
 }
 
 type Client struct {
@@ -25,9 +28,21 @@ type wsMessage struct {
 	Payload interface{} `json:"payload,omitempty"`
 }
 
+type activityHistoryItem struct {
+	message   []byte
+	createdAt time.Time
+}
+
+const (
+	clientSendBufferSize = 256
+	maxActivityHistory   = 200
+	activityHistoryTTL   = 24 * time.Hour
+)
+
 func NewHub() *Hub {
 	return &Hub{
-		clients: make(map[int64]map[*Client]struct{}),
+		clients:         make(map[int64]map[*Client]struct{}),
+		activityHistory: make([]activityHistoryItem, 0, maxActivityHistory),
 	}
 }
 
@@ -36,7 +51,7 @@ func (h *Hub) Register(userID int64, conn *websocket.Conn) {
 		hub:    h,
 		userID: userID,
 		conn:   conn,
-		send:   make(chan []byte, 16),
+		send:   make(chan []byte, clientSendBufferSize),
 	}
 
 	h.mu.Lock()
@@ -45,6 +60,15 @@ func (h *Hub) Register(userID int64, conn *websocket.Conn) {
 	}
 	h.clients[userID][client] = struct{}{}
 	h.mu.Unlock()
+
+	for _, message := range h.getActivityHistorySnapshot() {
+		select {
+		case client.send <- message:
+		default:
+			go h.unregister(client)
+			return
+		}
+	}
 
 	go client.writePump()
 	go client.readPump()
@@ -75,6 +99,10 @@ func (h *Hub) Broadcast(eventType string, payload interface{}) {
 		return
 	}
 
+	if eventType == "notifications.activity" {
+		h.appendActivityHistory(message)
+	}
+
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -87,6 +115,56 @@ func (h *Hub) Broadcast(eventType string, payload interface{}) {
 			}
 		}
 	}
+}
+
+func (h *Hub) appendActivityHistory(message []byte) {
+	h.historyMu.Lock()
+	defer h.historyMu.Unlock()
+
+	now := time.Now().UTC()
+	cutoff := now.Add(-activityHistoryTTL)
+
+	filtered := make([]activityHistoryItem, 0, len(h.activityHistory)+1)
+	for _, item := range h.activityHistory {
+		if item.createdAt.Before(cutoff) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+
+	cloned := append([]byte(nil), message...)
+	filtered = append(filtered, activityHistoryItem{
+		message:   cloned,
+		createdAt: now,
+	})
+
+	h.activityHistory = filtered
+	if len(h.activityHistory) <= maxActivityHistory {
+		return
+	}
+
+	start := len(h.activityHistory) - maxActivityHistory
+	h.activityHistory = append([]activityHistoryItem(nil), h.activityHistory[start:]...)
+}
+
+func (h *Hub) getActivityHistorySnapshot() [][]byte {
+	h.historyMu.RLock()
+	defer h.historyMu.RUnlock()
+
+	if len(h.activityHistory) == 0 {
+		return nil
+	}
+
+	cutoff := time.Now().UTC().Add(-activityHistoryTTL)
+	snapshot := make([][]byte, 0, len(h.activityHistory))
+	for _, item := range h.activityHistory {
+		if item.createdAt.Before(cutoff) {
+			continue
+		}
+		snapshot = append(snapshot, append([]byte(nil), item.message...))
+	}
+
+	return snapshot
 }
 
 func (h *Hub) SendToUser(userID int64, eventType string, payload interface{}) {
