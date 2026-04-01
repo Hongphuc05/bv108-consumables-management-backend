@@ -9,16 +9,23 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
+
+	"bv108-consumables-management-backend/internal/realtime"
 
 	"github.com/gin-gonic/gin"
 )
 
 type RefreshHandler struct {
 	hoaDonRepo interface{ GetCount() (int, error) }
+	hub        *realtime.Hub
 }
 
-func NewRefreshHandler(repo interface{ GetCount() (int, error) }) *RefreshHandler {
-	return &RefreshHandler{hoaDonRepo: repo}
+func NewRefreshHandler(repo interface{ GetCount() (int, error) }, hub *realtime.Hub) *RefreshHandler {
+	return &RefreshHandler{
+		hoaDonRepo: repo,
+		hub:        hub,
+	}
 }
 
 func parseCommandSpec(spec string) (string, []string) {
@@ -205,7 +212,13 @@ func (h *RefreshHandler) RefreshInvoices(c *gin.Context) {
 		return
 	}
 
-	fmt.Println("✅ Refresh completed successfully")
+	fmt.Println("Refresh completed successfully")
+	if h.hub != nil {
+		h.hub.Broadcast("invoices.data_refreshed", gin.H{
+			"total":       total,
+			"refreshedAt": time.Now().UTC().Format(time.RFC3339),
+		})
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Invoices refreshed successfully",

@@ -319,16 +319,16 @@ def print_invoice_summary(invoice_data: Dict):
     print(f"Tổng số hóa đơn: {metadata.get('total')} | Trang: {metadata.get('page')} | Số lượng/trang: {metadata.get('size')}")
     
     invoices = invoice_data.get("data", [])  # API trả về 'data' chứ không phải 'invoices'
-    print(f"\n📋 Danh sách {len(invoices)} hóa đơn:")
+    print(f"\nDanh sách {len(invoices)} hóa đơn:")
     print("="*100)
     
     for i, invoice in enumerate(invoices, 1):
         print(f"\n{'─'*100}")
         print(f"[{i}] HÓA ĐƠN SỐ: {invoice.get('invoiceNo')} | MẪU: {invoice.get('modelNo')} | KÝ HIỆU: {invoice.get('serial')}")
         print(f"{'─'*100}")
-        print(f"🏢 Bên bán : {invoice.get('sellerName')}")
+        print(f"Bên bán : {invoice.get('sellerName')}")
         print(f"   MST     : {invoice.get('sellerTaxNo')}")
-        print(f"🏥 Bên mua : {invoice.get('buyerName')}")
+        print(f"Bên mua : {invoice.get('buyerName')}")
         print(f"   MST     : {invoice.get('buyerTaxNo')}")
         print(f"{'─'*100}")
         
@@ -337,19 +337,19 @@ def print_invoice_summary(invoice_data: Dict):
         total = invoice.get('grandTotal') or 0
         currency = invoice.get('currency', 'VND')
         
-        print(f"💰 Tổng tiền trước thuế : {subtotal:>20,.0f} {currency}")
-        print(f"💰 Tiền thuế            : {tax:>20,.0f} {currency}")
-        print(f"💰 TỔNG TIỀN SAU THUẾ   : {total:>20,.0f} {currency}")
+        print(f"Tổng tiền trước thuế : {subtotal:>20,.0f} {currency}")
+        print(f"Tiền thuế            : {tax:>20,.0f} {currency}")
+        print(f"TỔNG TIỀN SAU THUẾ   : {total:>20,.0f} {currency}")
         print(f"{'─'*100}")
-        print(f"📅 Ngày phát hành : {invoice.get('invoiceReleaseDate')}")
-        print(f"📅 Ngày nhận      : {invoice.get('receivedDate')}")
-        print(f"✅ Trạng thái     : {invoice.get('status')}")
-        print(f"📝 Loại hóa đơn   : {invoice.get('invoiceType')}")
+        print(f"Ngày phát hành : {invoice.get('invoiceReleaseDate')}")
+        print(f"Ngày nhận      : {invoice.get('receivedDate')}")
+        print(f"Trạng thái     : {invoice.get('status')}")
+        print(f"Loại hóa đơn   : {invoice.get('invoiceType')}")
         
         # In thông tin chi tiết hàng hóa
         items = invoice.get("invoiceItems", [])
         if items:
-            print(f"\n📦 CHI TIẾT {len(items)} HÀNG HÓA:")
+            print(f"\nCHI TIẾT {len(items)} HÀNG HÓA:")
             print(f"{'─'*100}")
             for idx, item in enumerate(items, 1):
                 qty = item.get('itemQuantity') or 0
@@ -383,11 +383,11 @@ if __name__ == "__main__":
     
     try:
         # 1. Đăng nhập
-        print("🔐 Đang đăng nhập...")
+        print(" Đang đăng nhập...")
         login_result = client.login(remember_me=False)
         
         # 2. Lấy danh sách hóa đơn
-        print("\n📥 Đang lấy danh sách hóa đơn...")
+        print("\nĐang lấy danh sách hóa đơn...")
         
         # Ví dụ 1: Lấy tất cả hóa đơn điện tử đầu vào
         invoices = client.get_invoices(
@@ -409,14 +409,14 @@ if __name__ == "__main__":
         print(f"\n✓ Đã lưu kết quả vào file: {output_file}")
         
         # Ví dụ 2: Tìm hóa đơn theo số hóa đơn
-        print("\n\n🔍 Tìm hóa đơn theo số...")
+        print("\n\nTìm hóa đơn theo số...")
         specific_invoice = client.get_invoices(
             invoice_no="0001234",  # Thay bằng số hóa đơn cần tìm
             size=1
         )
         
         # Ví dụ 3: Lấy hóa đơn theo khoảng thời gian
-        print("\n\n📅 Lấy hóa đơn theo thời gian...")
+        print("\n\nLấy hóa đơn theo thời gian...")
         invoices_by_date = client.get_invoices(
             received_date_from="01/01/2024",
             received_date_to="31/12/2024",
@@ -427,4 +427,4 @@ if __name__ == "__main__":
         print(f"\nTìm thấy {invoices_by_date.get('metadata', {}).get('total')} hóa đơn")
         
     except Exception as e:
-        print(f"\n❌ Lỗi: {e}")
+        print(f"\nLỗi: {e}")

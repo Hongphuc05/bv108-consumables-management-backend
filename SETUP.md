@@ -49,7 +49,7 @@ CREATE TABLE users (
 	username VARCHAR(100) NOT NULL,
 	email VARCHAR(150) NOT NULL UNIQUE,
 	password_hash VARCHAR(255) NOT NULL,
-	role ENUM('nhan_vien','truong_khoa') NOT NULL,
+	role ENUM('admin','chi_huy_khoa','nhan_vien_kho','thu_kho','nhan_vien_ke_toan','nhan_vien_thau') NOT NULL,
 	is_active TINYINT(1) NOT NULL DEFAULT 1,
 	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -117,11 +117,12 @@ curl "http://localhost:8080/api/supplies/group?groupName=Nhóm A"
 curl http://localhost:8080/api/supplies/low-stock?threshold=20
 ```
 
-### Đăng ký tài khoản
+### Tạo tài khoản bởi Admin
 ```bash
 curl -X POST http://localhost:8080/api/auth/register \
 	-H "Content-Type: application/json" \
-	-d '{"username":"Nguyen Van A","email":"a@bv108.vn","password":"123456","role":"nhan_vien"}'
+	-H "Authorization: Bearer ADMIN_ACCESS_TOKEN" \
+	-d '{"username":"Nguyen Van A","email":"a@bv108.vn","password":"123456","role":"nhan_vien_kho"}'
 ```
 
 ### Đăng nhập bằng email
@@ -137,6 +138,13 @@ curl -X PUT http://localhost:8080/api/auth/profile \
 	-H "Content-Type: application/json" \
 	-H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
 	-d '{"username":"Nguyen Van B","email":"b@bv108.vn"}'
+```
+
+### Migration role cũ `truong_khoa` sang `admin`
+Chạy file SQL:
+
+```bash
+mysql -u YOUR_USER -p YOUR_DATABASE < sql/20260401_update_user_roles.sql
 ```
 
 ## ❗ Xử Lý Lỗi Thường Gặp

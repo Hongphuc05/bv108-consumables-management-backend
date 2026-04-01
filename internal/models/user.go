@@ -41,6 +41,20 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 	return &UserRepository{DB: db}
 }
 
+func (r *UserRepository) CountUsers() (int64, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM users
+	`
+
+	var total int64
+	if err := r.DB.QueryRow(query).Scan(&total); err != nil {
+		return 0, fmt.Errorf("error counting users: %w", err)
+	}
+
+	return total, nil
+}
+
 func (r *UserRepository) Create(username, email, passwordHash, role string) (*User, error) {
 	query := `
 		INSERT INTO users (username, email, password_hash, role, is_active)

@@ -57,6 +57,7 @@ type ForecastChangeHistoryRecord struct {
 	ActionType         string `json:"actionType"`
 	StatusBefore       string `json:"statusBefore,omitempty"`
 	StatusAfter        string `json:"statusAfter"`
+	LyDo               string `json:"lyDo,omitempty"`
 	DuTruGoc           *int   `json:"duTruGoc,omitempty"`
 	DuTruSua           *int   `json:"duTruSua,omitempty"`
 	NguoiThucHien      string `json:"nguoiThucHien"`
@@ -470,16 +471,18 @@ func (r *ForecastApprovalRepository) listApprovalHistory(limit, month, year int)
 			ma_quan_ly,
 			ma_vtyt_cu,
 			ten_vtyt_bv,
+			status,
+			COALESCE(ly_do, ''),
 			du_tru_goc,
 			du_tru_sua,
 			nguoi_duyet,
 			nguoi_duyet_email,
 			thoi_gian_duyet
 		FROM forecast_approvals
-		WHERE status = ?
+		WHERE status IN (?, ?)
 	`)
 
-	args := []interface{}{ForecastApprovalStatusApproved}
+	args := []interface{}{ForecastApprovalStatusApproved, ForecastApprovalStatusRejected}
 	if month > 0 {
 		queryBuilder.WriteString(" AND forecast_month = ?")
 		args = append(args, month)
@@ -505,6 +508,8 @@ func (r *ForecastApprovalRepository) listApprovalHistory(limit, month, year int)
 	for rows.Next() {
 		var row ForecastChangeHistoryRecord
 		var rawID int64
+		var status string
+		var lyDo string
 		var duTruGoc sql.NullInt64
 		var duTruSua sql.NullInt64
 		if err := rows.Scan(
@@ -514,6 +519,8 @@ func (r *ForecastApprovalRepository) listApprovalHistory(limit, month, year int)
 			&row.MaQuanLy,
 			&row.MaVtytCu,
 			&row.TenVtytBv,
+			&status,
+			&lyDo,
 			&duTruGoc,
 			&duTruSua,
 			&row.NguoiThucHien,
@@ -524,8 +531,9 @@ func (r *ForecastApprovalRepository) listApprovalHistory(limit, month, year int)
 		}
 
 		row.ID = -rawID
-		row.ActionType = "approve"
-		row.StatusAfter = ForecastApprovalStatusApproved
+		row.StatusAfter = strings.TrimSpace(status)
+		row.ActionType = actionTypeFromStatus(row.StatusAfter)
+		row.LyDo = strings.TrimSpace(lyDo)
 
 		if duTruGoc.Valid {
 			value := int(duTruGoc.Int64)
