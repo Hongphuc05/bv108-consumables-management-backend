@@ -15,6 +15,12 @@ type SupplyHandler struct {
 	repo *models.SupplyRepository
 }
 
+const (
+	defaultPage     = 1
+	defaultPageSize = 20
+	maxPageSize     = 1000
+)
+
 // NewSupplyHandler creates a new supply handler
 func NewSupplyHandler(repo *models.SupplyRepository) *SupplyHandler {
 	return &SupplyHandler{repo: repo}
@@ -39,6 +45,23 @@ type CompareRequest struct {
 	MaThuVien []string `json:"maThuVien"`
 }
 
+func parsePagination(c *gin.Context) (int, int) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", strconv.Itoa(defaultPage)))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", strconv.Itoa(defaultPageSize)))
+
+	if page < 1 {
+		page = defaultPage
+	}
+	if pageSize < 1 {
+		pageSize = defaultPageSize
+	}
+	if pageSize > maxPageSize {
+		pageSize = maxPageSize
+	}
+
+	return page, pageSize
+}
+
 // GetAllSupplies godoc
 // @Summary Get all supplies with pagination
 // @Description Get all medical supplies from database with pagination support
@@ -50,15 +73,7 @@ type CompareRequest struct {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/supplies [get]
 func (h *SupplyHandler) GetAllSupplies(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
-
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
+	page, pageSize := parsePagination(c)
 
 	supplies, total, err := h.repo.GetAll(page, pageSize)
 	if err != nil {
@@ -141,15 +156,7 @@ func (h *SupplyHandler) SearchSupplies(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
-
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
+	page, pageSize := parsePagination(c)
 
 	supplies, total, err := h.repo.SearchByName(keyword, page, pageSize)
 	if err != nil {
@@ -192,15 +199,7 @@ func (h *SupplyHandler) GetSuppliesByGroup(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
-
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
+	page, pageSize := parsePagination(c)
 
 	supplies, total, err := h.repo.GetByGroup(groupName, page, pageSize)
 	if err != nil {
@@ -257,15 +256,7 @@ func (h *SupplyHandler) GetAllGroups(c *gin.Context) {
 // @Router /api/supplies/low-stock [get]
 func (h *SupplyHandler) GetLowStockSupplies(c *gin.Context) {
 	threshold, _ := strconv.Atoi(c.DefaultQuery("threshold", "20"))
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
-
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
+	page, pageSize := parsePagination(c)
 
 	supplies, total, err := h.repo.GetLowStock(threshold, page, pageSize)
 	if err != nil {
@@ -292,15 +283,7 @@ func (h *SupplyHandler) GetCompareCatalog(c *gin.Context) {
 	keyword := strings.TrimSpace(c.Query("keyword"))
 	level1Filter := strings.TrimSpace(c.Query("level1Filter"))
 	level2Filter := strings.TrimSpace(c.Query("level2Filter"))
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
-
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
+	page, pageSize := parsePagination(c)
 
 	items, total, err := h.repo.GetCompareCatalog(keyword, level1Filter, level2Filter, page, pageSize)
 	if err != nil {
