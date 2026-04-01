@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -101,7 +102,7 @@ func NewForecastApprovalRepository(db *sql.DB) *ForecastApprovalRepository {
 }
 
 func (r *ForecastApprovalRepository) EnsureSchema() error {
-	statement := `
+	approvalsStatement := `
 		CREATE TABLE IF NOT EXISTS forecast_approvals (
 			id BIGINT NOT NULL AUTO_INCREMENT,
 			forecast_month INT NOT NULL,
@@ -126,8 +127,34 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 	`
 
-	if _, err := r.DB.Exec(statement); err != nil {
+	if _, err := r.DB.Exec(approvalsStatement); err != nil {
 		return fmt.Errorf("error ensuring forecast approvals schema: %w", err)
+	}
+
+	historyStatement := `
+		CREATE TABLE IF NOT EXISTS forecast_change_history (
+			id BIGINT NOT NULL AUTO_INCREMENT,
+			forecast_year INT NOT NULL,
+			forecast_month INT NOT NULL,
+			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
+			ma_vtyt_cu VARCHAR(255) NOT NULL,
+			ten_vtyt_bv VARCHAR(500) NOT NULL,
+			du_tru_goc INT NULL,
+			du_tru_sua INT NULL,
+			nguoi_thuc_hien_id BIGINT NOT NULL,
+			nguoi_thuc_hien VARCHAR(255) NOT NULL,
+			nguoi_thuc_hien_email VARCHAR(255) NOT NULL DEFAULT '',
+			thoi_gian_thuc_hien DATETIME NOT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (id),
+			KEY idx_forecast_change_history_period (forecast_year, forecast_month),
+			KEY idx_forecast_change_history_item (ma_vtyt_cu),
+			KEY idx_forecast_change_history_lookup (forecast_year, forecast_month, ma_quan_ly, ma_vtyt_cu, thoi_gian_thuc_hien, id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+	`
+
+	if _, err := r.DB.Exec(historyStatement); err != nil {
+		return fmt.Errorf("error ensuring forecast change history schema: %w", err)
 	}
 
 	return nil
@@ -246,19 +273,6 @@ func (r *ForecastApprovalRepository) SaveApprovals(inputs []SaveForecastApproval
 	`
 
 	for _, input := range inputs {
-		nowDatetime := time.Now().Format("2006-01-02 15:04:05")
-
-		var existingStatus sql.NullString
-		err := tx.QueryRow(
-			`SELECT status FROM forecast_approvals WHERE forecast_month = ? AND forecast_year = ? AND ma_vtyt_cu = ? LIMIT 1`,
-			input.ForecastMonth,
-			input.ForecastYear,
-			input.MaVtytCu,
-		).Scan(&existingStatus)
-		if err != nil && err != sql.ErrNoRows {
-			return fmt.Errorf("error reading previous forecast status: %w", err)
-		}
-
 		if _, err := tx.Exec(
 			statement,
 			input.ForecastMonth,
@@ -278,46 +292,37 @@ func (r *ForecastApprovalRepository) SaveApprovals(inputs []SaveForecastApproval
 			return fmt.Errorf("error saving forecast approval: %w", err)
 		}
 
-		var statusBefore interface{}
-		if existingStatus.Valid {
-			statusBefore = existingStatus.String
-		}
-
-		if _, err := tx.Exec(`
-			INSERT INTO forecast_change_history (
-				forecast_year,
-				forecast_month,
-				ma_quan_ly,
-				ma_vtyt_cu,
-				ten_vtyt_bv,
-				action_type,
-				status_before,
-				status_after,
-				du_tru_goc,
-				du_tru_sua,
-				nguoi_thuc_hien_id,
-				nguoi_thuc_hien,
-				nguoi_thuc_hien_email,
-				thoi_gian_thuc_hien
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`,
-			input.ForecastYear,
-			input.ForecastMonth,
-			input.MaQuanLy,
-			input.MaVtytCu,
-			input.TenVtytBv,
-			actionTypeFromStatus(input.Status),
-			statusBefore,
-			input.Status,
-			nullableIntPointer(input.DuTruGoc),
-			nullableIntPointer(input.DuTruSua),
-			input.Reviewer.ID,
-			input.Reviewer.Username,
-			input.Reviewer.Email,
-			nowDatetime,
-		); err != nil {
-			return fmt.Errorf("error saving forecast change history: %w", err)
+		if shouldPersistForecastChange(input) {
+			if _, err := tx.Exec(`
+				INSERT INTO forecast_change_history (
+					forecast_year,
+					forecast_month,
+					ma_quan_ly,
+					ma_vtyt_cu,
+					ten_vtyt_bv,
+					du_tru_goc,
+					du_tru_sua,
+					nguoi_thuc_hien_id,
+					nguoi_thuc_hien,
+					nguoi_thuc_hien_email,
+					thoi_gian_thuc_hien
+				)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`,
+				input.ForecastYear,
+				input.ForecastMonth,
+				input.MaQuanLy,
+				input.MaVtytCu,
+				input.TenVtytBv,
+				nullableIntPointer(input.DuTruGoc),
+				nullableIntPointer(input.DuTruSua),
+				input.Reviewer.ID,
+				input.Reviewer.Username,
+				input.Reviewer.Email,
+				time.Now(),
+			); err != nil {
+				return fmt.Errorf("error saving forecast change history: %w", err)
+			}
 		}
 	}
 
@@ -328,12 +333,13 @@ func (r *ForecastApprovalRepository) SaveApprovals(inputs []SaveForecastApproval
 	return nil
 }
 
-func (r *ForecastApprovalRepository) ListChangeHistory(limit int) ([]ForecastChangeHistoryRecord, error) {
-	if limit <= 0 || limit > 5000 {
+func (r *ForecastApprovalRepository) ListChangeHistory(limit, month, year int, latestOnly bool) ([]ForecastChangeHistoryRecord, error) {
+	if !latestOnly && (limit <= 0 || limit > 5000) {
 		limit = 1000
 	}
 
-	rows, err := r.DB.Query(`
+	queryBuilder := strings.Builder{}
+	queryBuilder.WriteString(`
 		SELECT
 			id,
 			forecast_month,
@@ -341,24 +347,43 @@ func (r *ForecastApprovalRepository) ListChangeHistory(limit int) ([]ForecastCha
 			ma_quan_ly,
 			ma_vtyt_cu,
 			ten_vtyt_bv,
-			action_type,
-			COALESCE(status_before, ''),
-			status_after,
 			du_tru_goc,
 			du_tru_sua,
 			nguoi_thuc_hien,
 			nguoi_thuc_hien_email,
 			DATE_FORMAT(thoi_gian_thuc_hien, '%Y-%m-%dT%H:%i:%s')
 		FROM forecast_change_history
-		ORDER BY thoi_gian_thuc_hien DESC, id DESC
-		LIMIT ?
-	`, limit)
+	`)
+
+	whereClauses := make([]string, 0, 2)
+	args := make([]interface{}, 0, 3)
+	if month > 0 {
+		whereClauses = append(whereClauses, "forecast_month = ?")
+		args = append(args, month)
+	}
+	if year > 0 {
+		whereClauses = append(whereClauses, "forecast_year = ?")
+		args = append(args, year)
+	}
+	if len(whereClauses) > 0 {
+		queryBuilder.WriteString(" WHERE ")
+		queryBuilder.WriteString(strings.Join(whereClauses, " AND "))
+	}
+
+	queryBuilder.WriteString(" ORDER BY thoi_gian_thuc_hien DESC, id DESC")
+	if !latestOnly {
+		queryBuilder.WriteString(" LIMIT ?")
+		args = append(args, limit)
+	}
+
+	rows, err := r.DB.Query(queryBuilder.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("error listing forecast change history: %w", err)
 	}
 	defer rows.Close()
 
 	records := make([]ForecastChangeHistoryRecord, 0)
+	seenLatestKeys := map[string]struct{}{}
 	for rows.Next() {
 		var row ForecastChangeHistoryRecord
 		var duTruGoc sql.NullInt64
@@ -370,9 +395,6 @@ func (r *ForecastApprovalRepository) ListChangeHistory(limit int) ([]ForecastCha
 			&row.MaQuanLy,
 			&row.MaVtytCu,
 			&row.TenVtytBv,
-			&row.ActionType,
-			&row.StatusBefore,
-			&row.StatusAfter,
 			&duTruGoc,
 			&duTruSua,
 			&row.NguoiThucHien,
@@ -391,11 +413,134 @@ func (r *ForecastApprovalRepository) ListChangeHistory(limit int) ([]ForecastCha
 			row.DuTruSua = &value
 		}
 
+		row.ActionType = "edit"
+		row.StatusAfter = ForecastApprovalStatusEdited
+
+		if latestOnly {
+			recordKey := forecastChangeHistoryKey(row.ForecastMonth, row.ForecastYear, row.MaQuanLy, row.MaVtytCu)
+			if _, exists := seenLatestKeys[recordKey]; exists {
+				continue
+			}
+			seenLatestKeys[recordKey] = struct{}{}
+		}
+
 		records = append(records, row)
+		if latestOnly && limit > 0 && len(records) >= limit {
+			break
+		}
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating forecast change history: %w", err)
+	}
+
+	if latestOnly {
+		return records, nil
+	}
+
+	approvalRecords, err := r.listApprovalHistory(limit, month, year)
+	if err != nil {
+		return nil, err
+	}
+
+	records = append(records, approvalRecords...)
+	sort.SliceStable(records, func(i, j int) bool {
+		leftTime := parseForecastHistoryTime(records[i].ThoiGianThucHien)
+		rightTime := parseForecastHistoryTime(records[j].ThoiGianThucHien)
+		if !leftTime.Equal(rightTime) {
+			return leftTime.After(rightTime)
+		}
+		return records[i].ID > records[j].ID
+	})
+
+	if limit > 0 && len(records) > limit {
+		records = records[:limit]
+	}
+
+	return records, nil
+}
+
+func (r *ForecastApprovalRepository) listApprovalHistory(limit, month, year int) ([]ForecastChangeHistoryRecord, error) {
+	queryBuilder := strings.Builder{}
+	queryBuilder.WriteString(`
+		SELECT
+			id,
+			forecast_month,
+			forecast_year,
+			ma_quan_ly,
+			ma_vtyt_cu,
+			ten_vtyt_bv,
+			du_tru_goc,
+			du_tru_sua,
+			nguoi_duyet,
+			nguoi_duyet_email,
+			thoi_gian_duyet
+		FROM forecast_approvals
+		WHERE status = ?
+	`)
+
+	args := []interface{}{ForecastApprovalStatusApproved}
+	if month > 0 {
+		queryBuilder.WriteString(" AND forecast_month = ?")
+		args = append(args, month)
+	}
+	if year > 0 {
+		queryBuilder.WriteString(" AND forecast_year = ?")
+		args = append(args, year)
+	}
+
+	queryBuilder.WriteString(" ORDER BY updated_at DESC, id DESC")
+	if limit > 0 {
+		queryBuilder.WriteString(" LIMIT ?")
+		args = append(args, limit)
+	}
+
+	rows, err := r.DB.Query(queryBuilder.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("error listing forecast approval history: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]ForecastChangeHistoryRecord, 0)
+	for rows.Next() {
+		var row ForecastChangeHistoryRecord
+		var rawID int64
+		var duTruGoc sql.NullInt64
+		var duTruSua sql.NullInt64
+		if err := rows.Scan(
+			&rawID,
+			&row.ForecastMonth,
+			&row.ForecastYear,
+			&row.MaQuanLy,
+			&row.MaVtytCu,
+			&row.TenVtytBv,
+			&duTruGoc,
+			&duTruSua,
+			&row.NguoiThucHien,
+			&row.NguoiThucHienEmail,
+			&row.ThoiGianThucHien,
+		); err != nil {
+			return nil, fmt.Errorf("error scanning forecast approval history: %w", err)
+		}
+
+		row.ID = -rawID
+		row.ActionType = "approve"
+		row.StatusAfter = ForecastApprovalStatusApproved
+
+		if duTruGoc.Valid {
+			value := int(duTruGoc.Int64)
+			row.DuTruGoc = &value
+		}
+		if duTruSua.Valid {
+			value := int(duTruSua.Int64)
+			row.DuTruSua = &value
+		}
+
+		records = append(records, row)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating forecast approval history: %w", err)
 	}
 
 	return records, nil
@@ -404,27 +549,38 @@ func (r *ForecastApprovalRepository) ListChangeHistory(limit int) ([]ForecastCha
 func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonthlyHistoryRecord, error) {
 	rows, err := r.DB.Query(`
 		SELECT
-			h.id,
-			h.forecast_month,
-			h.forecast_year,
-			h.ma_vtyt_cu,
-			h.ten_vtyt_bv,
-			h.status_after,
-			h.du_tru_goc,
-			h.du_tru_sua,
-			h.nguoi_thuc_hien,
-			DATE_FORMAT(h.thoi_gian_thuc_hien, '%Y-%m-%dT%H:%i:%s'),
+			fa.id,
+			fa.forecast_month,
+			fa.forecast_year,
+			fa.ma_vtyt_cu,
+			fa.ten_vtyt_bv,
+			fa.status,
+			COALESCE(h.du_tru_goc, fa.du_tru_goc),
+			COALESCE(h.du_tru_sua, fa.du_tru_sua),
+			fa.nguoi_duyet,
+			fa.thoi_gian_duyet,
 			COALESCE(s.QUY_CACH_DONG_GOI, ''),
 			COALESCE(s.UNIT, ''),
 			COALESCE(s.PRICE, 0)
-		FROM forecast_change_history h
-		INNER JOIN (
-			SELECT MAX(id) AS latest_id
-			FROM forecast_change_history
-			GROUP BY forecast_year, forecast_month, ma_vtyt_cu
-		) latest ON latest.latest_id = h.id
-		LEFT JOIN supplies s ON TRIM(COALESCE(s.ID, '')) = TRIM(h.ma_vtyt_cu)
-		ORDER BY h.forecast_year DESC, h.forecast_month DESC, h.thoi_gian_thuc_hien DESC, h.id DESC
+		FROM forecast_approvals fa
+		LEFT JOIN (
+			SELECT
+				h1.forecast_year,
+				h1.forecast_month,
+				h1.ma_vtyt_cu,
+				h1.du_tru_goc,
+				h1.du_tru_sua
+			FROM forecast_change_history h1
+			INNER JOIN (
+				SELECT MAX(id) AS latest_id
+				FROM forecast_change_history
+				GROUP BY forecast_year, forecast_month, ma_vtyt_cu
+			) latest ON latest.latest_id = h1.id
+		) h ON h.forecast_year = fa.forecast_year
+			AND h.forecast_month = fa.forecast_month
+			AND TRIM(COALESCE(h.ma_vtyt_cu, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
+		LEFT JOIN supplies s ON TRIM(COALESCE(s.ID, '')) = TRIM(fa.ma_vtyt_cu)
+		ORDER BY fa.forecast_year DESC, fa.forecast_month DESC, fa.updated_at DESC, fa.id DESC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("error listing monthly forecast change history: %w", err)
@@ -502,10 +658,9 @@ func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonth
 			duTru = int(duTruGoc.Int64)
 		}
 
-		packSize := extractPackQuantity(quyCach)
-		goiHang := int(math.Ceil(float64(duTru) / float64(packSize)))
+		goiHang := duTru
 		unitPrice := int64(math.Round(donGia))
-		thanhTien := int64(goiHang) * int64(packSize) * unitPrice
+		thanhTien := int64(goiHang) * unitPrice
 
 		bucket.record.DanhSachVatTu = append(bucket.record.DanhSachVatTu, ForecastMonthlyHistoryItem{
 			STT:        itemID,
@@ -582,6 +737,32 @@ func actionTypeFromStatus(status string) string {
 	default:
 		return "approve"
 	}
+}
+
+func shouldPersistForecastChange(input SaveForecastApprovalInput) bool {
+	return input.Status == ForecastApprovalStatusEdited || input.DuTruGoc != nil || input.DuTruSua != nil
+}
+
+func forecastChangeHistoryKey(month, year int, maQuanLy, maVtytCu string) string {
+	return fmt.Sprintf("%d-%02d-%s-%s", year, month, strings.TrimSpace(maQuanLy), strings.TrimSpace(maVtytCu))
+}
+
+func parseForecastHistoryTime(value string) time.Time {
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+	}
+
+	for _, layout := range layouts {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return parsed
+		}
+	}
+
+	return time.Time{}
 }
 
 var packSizeRegex = regexp.MustCompile(`\d+`)
