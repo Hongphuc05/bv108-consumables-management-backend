@@ -135,12 +135,15 @@ func (h *OrderHandler) SaveInvoiceReconciliations(c *gin.Context) {
 	}
 
 	var updatedCount int64
+	var noteUpdatedCount int64
+	var statusUpdatedCount int64
 	if len(noteUpdates) > 0 {
 		count, err := h.invoiceMatchRepo.UpdateNotesBulk(noteUpdates)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
 			return
 		}
+		noteUpdatedCount += count
 		updatedCount += count
 	}
 
@@ -150,15 +153,43 @@ func (h *OrderHandler) SaveInvoiceReconciliations(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
 			return
 		}
+		statusUpdatedCount += count
 		updatedCount += count
 	}
 
 	if h.hub != nil && updatedCount > 0 {
+		now := time.Now().UTC()
 		h.hub.Broadcast("invoices.reconciliation_updated", gin.H{
-			"count":     updatedCount,
-			"updatedBy": currentUser.Username,
-			"updatedAt": time.Now().UTC().Format(time.RFC3339),
+			"count":       updatedCount,
+			"noteCount":   noteUpdatedCount,
+			"statusCount": statusUpdatedCount,
+			"updatedBy":   currentUser.Username,
+			"updatedAt":   now.Format(time.RFC3339Nano),
 		})
+
+		if noteUpdatedCount > 0 {
+			broadcastActivityNotification(h.hub, ActivityNotificationPayload{
+				Category:   "invoices",
+				Action:     "invoices.note_saved",
+				ActorID:    currentUser.ID,
+				ActorName:  currentUser.Username,
+				ActorEmail: currentUser.Email,
+				Count:      int(noteUpdatedCount),
+				CreatedAt:  now.Format(time.RFC3339Nano),
+			})
+		}
+
+		if statusUpdatedCount > 0 {
+			broadcastActivityNotification(h.hub, ActivityNotificationPayload{
+				Category:   "invoices",
+				Action:     "invoices.approved",
+				ActorID:    currentUser.ID,
+				ActorName:  currentUser.Username,
+				ActorEmail: currentUser.Email,
+				Count:      int(statusUpdatedCount),
+				CreatedAt:  now.Format(time.RFC3339Nano),
+			})
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Invoice reconciliation updated", "count": updatedCount})
@@ -384,6 +415,18 @@ func (h *OrderHandler) CreateForecastOrders(c *gin.Context) {
 		h.hub.Broadcast("orders.new_pending", gin.H{
 			"groupKeys": uniqueNonEmptyStrings(createdGroupKeys),
 			"createdAt": approvalTime,
+			"updatedBy": currentUser.Username,
+			"action":    "forecast_created",
+		})
+
+		broadcastActivityNotification(h.hub, ActivityNotificationPayload{
+			Category:   "orders",
+			Action:     "orders.pending_created",
+			ActorID:    currentUser.ID,
+			ActorName:  currentUser.Username,
+			ActorEmail: currentUser.Email,
+			Count:      len(inputs),
+			CreatedAt:  approvalTime,
 		})
 	}
 
@@ -437,11 +480,22 @@ func (h *OrderHandler) CreateManualOrder(c *gin.Context) {
 	}
 
 	if h.hub != nil {
+		now := time.Now().UTC()
 		h.hub.Broadcast("orders.updated", gin.H{
 			"action":    "manual_created",
 			"count":     1,
 			"updatedBy": currentUser.Username,
-			"updatedAt": time.Now().UTC().Format(time.RFC3339),
+			"updatedAt": now.Format(time.RFC3339Nano),
+		})
+
+		broadcastActivityNotification(h.hub, ActivityNotificationPayload{
+			Category:   "orders",
+			Action:     "orders.manual_created",
+			ActorID:    currentUser.ID,
+			ActorName:  currentUser.Username,
+			ActorEmail: currentUser.Email,
+			Count:      1,
+			CreatedAt:  now.Format(time.RFC3339Nano),
 		})
 	}
 
@@ -503,11 +557,22 @@ func (h *OrderHandler) PlaceOrders(c *gin.Context) {
 	}
 
 	if h.hub != nil && placedCount > 0 {
+		now := time.Now().UTC()
 		h.hub.Broadcast("orders.updated", gin.H{
 			"action":    "placed",
 			"count":     placedCount,
 			"updatedBy": currentUser.Username,
-			"updatedAt": time.Now().UTC().Format(time.RFC3339),
+			"updatedAt": now.Format(time.RFC3339Nano),
+		})
+
+		broadcastActivityNotification(h.hub, ActivityNotificationPayload{
+			Category:   "orders",
+			Action:     "orders.placed",
+			ActorID:    currentUser.ID,
+			ActorName:  currentUser.Username,
+			ActorEmail: currentUser.Email,
+			Count:      placedCount,
+			CreatedAt:  now.Format(time.RFC3339Nano),
 		})
 	}
 

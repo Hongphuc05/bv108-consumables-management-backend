@@ -183,13 +183,40 @@ func (h *ForecastApprovalHandler) broadcastForecastApprovalUpdated(currentUser *
 	}
 
 	normalizedStatus := strings.TrimSpace(status)
+	now := time.Now().UTC()
 	h.hub.Broadcast("forecast.approvals_updated", gin.H{
 		"month":     month,
 		"year":      year,
 		"status":    normalizedStatus,
 		"count":     count,
 		"updatedBy": currentUser.Username,
-		"updatedAt": time.Now().UTC().Format(time.RFC3339),
+		"updatedAt": now.Format(time.RFC3339Nano),
+	})
+
+	action := ""
+	switch normalizedStatus {
+	case models.ForecastApprovalStatusEdited:
+		action = "forecast.edited"
+	case models.ForecastApprovalStatusApproved:
+		action = "forecast.approved"
+	case models.ForecastApprovalStatusRejected:
+		action = "forecast.rejected"
+	}
+	if action == "" {
+		return
+	}
+
+	broadcastActivityNotification(h.hub, ActivityNotificationPayload{
+		Category:   "forecast",
+		Action:     action,
+		ActorID:    currentUser.ID,
+		ActorName:  currentUser.Username,
+		ActorEmail: currentUser.Email,
+		Count:      count,
+		Status:     normalizedStatus,
+		Month:      month,
+		Year:       year,
+		CreatedAt:  now.Format(time.RFC3339Nano),
 	})
 }
 
