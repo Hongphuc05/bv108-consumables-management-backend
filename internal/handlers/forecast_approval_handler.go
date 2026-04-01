@@ -73,7 +73,17 @@ func (h *ForecastApprovalHandler) GetForecastChangeHistory(c *gin.Context) {
 	}
 
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "1000"))
-	records, err := h.repo.ListChangeHistory(limit)
+	month, _ := strconv.Atoi(c.DefaultQuery("month", "0"))
+	year, _ := strconv.Atoi(c.DefaultQuery("year", "0"))
+	latestOnlyRaw := strings.TrimSpace(c.DefaultQuery("latestOnly", "0"))
+	latestOnly := latestOnlyRaw == "1" || strings.EqualFold(latestOnlyRaw, "true")
+
+	if month < 0 || month > 12 || year < 0 || (year > 0 && year < 2000) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "month/year is invalid"})
+		return
+	}
+
+	records, err := h.repo.ListChangeHistory(limit, month, year, latestOnly)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
 		return
