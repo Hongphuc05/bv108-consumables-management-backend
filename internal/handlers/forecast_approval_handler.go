@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"bv108-consumables-management-backend/internal/models"
+	"bv108-consumables-management-backend/internal/realtime"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,6 +17,7 @@ type ForecastApprovalHandler struct {
 	repo      *models.ForecastApprovalRepository
 	userRepo  *models.UserRepository
 	jwtSecret []byte
+	hub       *realtime.Hub
 }
 
 type SaveForecastApprovalRequest struct {
@@ -34,11 +36,12 @@ type SaveForecastApprovalsRequest struct {
 	Items []SaveForecastApprovalRequest `json:"items" binding:"required"`
 }
 
-func NewForecastApprovalHandler(repo *models.ForecastApprovalRepository, userRepo *models.UserRepository, jwtSecret string) *ForecastApprovalHandler {
+func NewForecastApprovalHandler(repo *models.ForecastApprovalRepository, userRepo *models.UserRepository, jwtSecret string, hub *realtime.Hub) *ForecastApprovalHandler {
 	return &ForecastApprovalHandler{
 		repo:      repo,
 		userRepo:  userRepo,
 		jwtSecret: []byte(jwtSecret),
+		hub:       hub,
 	}
 }
 
@@ -131,6 +134,7 @@ func (h *ForecastApprovalHandler) SaveForecastApproval(c *gin.Context) {
 		return
 	}
 
+	h.broadcastForecastApprovalUpdated(currentUser, input.ForecastMonth, input.ForecastYear, input.Status, 1)
 	c.JSON(http.StatusOK, gin.H{"message": "Forecast approval saved successfully"})
 }
 
@@ -167,7 +171,26 @@ func (h *ForecastApprovalHandler) SaveForecastApprovalsBulk(c *gin.Context) {
 		return
 	}
 
+	firstInput := inputs[0]
+	h.broadcastForecastApprovalUpdated(currentUser, firstInput.ForecastMonth, firstInput.ForecastYear, firstInput.Status, len(inputs))
+
 	c.JSON(http.StatusOK, gin.H{"message": "Forecast approvals saved successfully", "count": len(inputs)})
+}
+
+func (h *ForecastApprovalHandler) broadcastForecastApprovalUpdated(currentUser *models.UserProfile, month int, year int, status string, count int) {
+	if h.hub == nil {
+		return
+	}
+
+	normalizedStatus := strings.TrimSpace(status)
+	h.hub.Broadcast("forecast.approvals_updated", gin.H{
+		"month":     month,
+		"year":      year,
+		"status":    normalizedStatus,
+		"count":     count,
+		"updatedBy": currentUser.Username,
+		"updatedAt": time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 func buildForecastApprovalInput(req SaveForecastApprovalRequest, currentUser *models.UserProfile) (models.SaveForecastApprovalInput, error) {

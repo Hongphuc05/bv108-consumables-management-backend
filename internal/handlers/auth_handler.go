@@ -18,8 +18,15 @@ import (
 )
 
 const (
-	RoleNhanVien   = "nhan_vien"
-	RoleTruongKhoa = "truong_khoa"
+	RoleNhanVien         = "nhan_vien"
+	RoleTruongKhoa       = "truong_khoa"
+	RoleAdmin            = "admin"
+	RoleChiHuyKhoa       = "chi_huy_khoa"
+	RoleNhanVienKho      = "nhan_vien_kho"
+	RoleThuKho           = "thu_kho"
+	RoleNhanVienKeToan   = "nhan_vien_ke_toan"
+	RoleNhanVienThau     = "nhan_vien_thau"
+	createAccountMessage = "Only admin can create accounts"
 )
 
 type AuthHandler struct {
@@ -46,9 +53,23 @@ type AuthResponse struct {
 	User      models.UserProfile `json:"user"`
 }
 
+type RegisterResponse struct {
+	Message string             `json:"message"`
+	User    models.UserProfile `json:"user"`
+}
+
 type UpdateProfileRequest struct {
 	Username string `json:"username" binding:"required"`
 	Email    string `json:"email" binding:"required"`
+}
+
+type statusError struct {
+	status  int
+	message string
+}
+
+func (e *statusError) Error() string {
+	return e.message
 }
 
 func NewAuthHandler(userRepo *models.UserRepository, jwtSecret string, jwtExpiresHours int) *AuthHandler {
@@ -73,6 +94,10 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	req.Role = strings.ToLower(strings.TrimSpace(req.Role))
 
+	if req.Role == RoleTruongKhoa {
+		req.Role = RoleAdmin
+	}
+
 	if req.Username == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_USERNAME", Message: "Username is required"})
 		return
@@ -88,8 +113,30 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	if !isValidRole(req.Role) {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_ROLE", Message: "Role must be nhan_vien or truong_khoa"})
+	if !isAssignableRole(req.Role) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error:   "INVALID_ROLE",
+			Message: "Role must be one of: admin, chi_huy_khoa, nhan_vien_kho, thu_kho, nhan_vien_ke_toan, nhan_vien_thau",
+		})
+		return
+	}
+
+	if err := h.ensureCanCreateUser(c, req.Role); err != nil {
+		var requestErr *statusError
+		if errors.As(err, &requestErr) {
+			errorCode := "UNAUTHORIZED"
+			if requestErr.status == http.StatusForbidden {
+				errorCode = "FORBIDDEN"
+			}
+			if requestErr.status == http.StatusBadRequest {
+				errorCode = "INVALID_ROLE"
+			}
+
+			c.JSON(requestErr.status, ErrorResponse{Error: errorCode, Message: requestErr.message})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
 		return
 	}
 
@@ -111,16 +158,9 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	token, expiresAt, err := h.generateToken(createdUser)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "TOKEN_ERROR", Message: "Failed to generate token"})
-		return
-	}
-
-	c.JSON(http.StatusCreated, AuthResponse{
-		Token:     token,
-		ExpiresAt: expiresAt.Format(time.RFC3339),
-		User:      createdUser.ToProfile(),
+	c.JSON(http.StatusCreated, RegisterResponse{
+		Message: "User created successfully",
+		User:    createdUser.ToProfile(),
 	})
 }
 
@@ -265,8 +305,53 @@ func isValidEmail(email string) bool {
 	return err == nil
 }
 
-func isValidRole(role string) bool {
-	return role == RoleNhanVien || role == RoleTruongKhoa
+func isAssignableRole(role string) bool {
+	switch role {
+	case RoleAdmin, RoleChiHuyKhoa, RoleNhanVienKho, RoleThuKho, RoleNhanVienKeToan, RoleNhanVienThau:
+		return true
+	default:
+		return false
+	}
+}
+
+func isAccountCreatorRole(role string) bool {
+	return role == RoleAdmin || role == RoleTruongKhoa
+}
+
+func (h *AuthHandler) ensureCanCreateUser(c *gin.Context, requestedRole string) error {
+	requestingUser, err := h.getCurrentUser(c)
+	if err == nil {
+		if !requestingUser.IsActive {
+			return &statusError{status: http.StatusForbidden, message: "User account is disabled"}
+		}
+		if !isAccountCreatorRole(requestingUser.Role) {
+			return &statusError{status: http.StatusForbidden, message: createAccountMessage}
+		}
+		return nil
+	}
+
+	userCount, countErr := h.userRepo.CountUsers()
+	if countErr != nil {
+		return countErr
+	}
+
+	if userCount == 0 {
+		if requestedRole != RoleAdmin {
+			return &statusError{status: http.StatusBadRequest, message: "First account must use role admin"}
+		}
+		return nil
+	}
+
+	return &statusError{status: http.StatusUnauthorized, message: createAccountMessage}
+}
+
+func (h *AuthHandler) getCurrentUser(c *gin.Context) (*models.User, error) {
+	userID, err := h.getUserIDFromAuthorizationHeader(c)
+	if err != nil {
+		return nil, err
+	}
+
+	return h.userRepo.GetByID(userID)
 }
 
 func (h *AuthHandler) getUserIDFromAuthorizationHeader(c *gin.Context) (int64, error) {

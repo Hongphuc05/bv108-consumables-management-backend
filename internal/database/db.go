@@ -31,7 +31,7 @@ func InitDB() error {
 	DB.SetMaxOpenConns(25)
 	DB.SetMaxIdleConns(5)
 
-	log.Println("✅ Database connection established successfully")
+	log.Println("Database connection established successfully")
 	return nil
 }
 

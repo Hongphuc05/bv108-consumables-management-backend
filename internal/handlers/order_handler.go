@@ -82,7 +82,8 @@ func (h *OrderHandler) SaveInvoiceReconciliations(c *gin.Context) {
 		return
 	}
 
-	if _, err := h.getCurrentUser(c); err != nil {
+	currentUser, err := h.getCurrentUser(c)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
 		return
 	}
@@ -150,6 +151,14 @@ func (h *OrderHandler) SaveInvoiceReconciliations(c *gin.Context) {
 			return
 		}
 		updatedCount += count
+	}
+
+	if h.hub != nil && updatedCount > 0 {
+		h.hub.Broadcast("invoices.reconciliation_updated", gin.H{
+			"count":     updatedCount,
+			"updatedBy": currentUser.Username,
+			"updatedAt": time.Now().UTC().Format(time.RFC3339),
+		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Invoice reconciliation updated", "count": updatedCount})
@@ -427,6 +436,15 @@ func (h *OrderHandler) CreateManualOrder(c *gin.Context) {
 		return
 	}
 
+	if h.hub != nil {
+		h.hub.Broadcast("orders.updated", gin.H{
+			"action":    "manual_created",
+			"count":     1,
+			"updatedBy": currentUser.Username,
+			"updatedAt": time.Now().UTC().Format(time.RFC3339),
+		})
+	}
+
 	c.JSON(http.StatusCreated, gin.H{"message": "Manual order added to pending list successfully"})
 }
 
@@ -482,6 +500,15 @@ func (h *OrderHandler) PlaceOrders(c *gin.Context) {
 
 		c.JSON(statusCode, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
 		return
+	}
+
+	if h.hub != nil && placedCount > 0 {
+		h.hub.Broadcast("orders.updated", gin.H{
+			"action":    "placed",
+			"count":     placedCount,
+			"updatedBy": currentUser.Username,
+			"updatedAt": time.Now().UTC().Format(time.RFC3339),
+		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{

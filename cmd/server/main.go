@@ -73,11 +73,11 @@ func main() {
 	if err := forecastApprovalRepo.EnsureSchema(); err != nil {
 		log.Fatal("Failed to initialize forecast approval schema:", err)
 	}
-	forecastApprovalHandler := handlers.NewForecastApprovalHandler(forecastApprovalRepo, userRepo, config.AppConfig.JWTSecret)
+	forecastApprovalHandler := handlers.NewForecastApprovalHandler(forecastApprovalRepo, userRepo, config.AppConfig.JWTSecret, realtimeHub)
 
 	hoaDonRepo := models.NewHoaDonRepository(database.DB)
 	hoaDonHandler := handlers.NewHoaDonHandler(hoaDonRepo)
-	refreshHandler := handlers.NewRefreshHandler(hoaDonRepo)
+	refreshHandler := handlers.NewRefreshHandler(hoaDonRepo, realtimeHub)
 
 	// Initialize Gin router
 	router := gin.Default()
