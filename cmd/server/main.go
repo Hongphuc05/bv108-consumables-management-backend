@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"bv108-consumables-management-backend/config"
 	"bv108-consumables-management-backend/internal/database"
@@ -16,6 +17,31 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
+
+func mustRunStartupStep(stepName string, fn func() error) {
+	startedAt := time.Now()
+	if err := fn(); err != nil {
+		log.Fatalf("%s failed: %v", stepName, err)
+	}
+	log.Printf("[startup] %s completed in %s", stepName, time.Since(startedAt).Round(time.Millisecond))
+}
+
+func runCompanyContactWarmup(repo *models.CompanyContactRepository) {
+	startedAt := time.Now()
+	log.Println("[startup] company contact warmup started (background)")
+
+	if err := repo.SyncFromExistingData(models.DefaultCompanyContactEmail); err != nil {
+		log.Printf("[startup] company contact warmup sync failed: %v", err)
+		return
+	}
+
+	if err := repo.BackfillOrderReferences(); err != nil {
+		log.Printf("[startup] company contact warmup backfill failed: %v", err)
+		return
+	}
+
+	log.Printf("[startup] company contact warmup completed in %s", time.Since(startedAt).Round(time.Millisecond))
+}
 
 func main() {
 	// Load configuration
@@ -38,27 +64,17 @@ func main() {
 	userRepo := models.NewUserRepository(database.DB)
 	authHandler := handlers.NewAuthHandler(userRepo, config.AppConfig.JWTSecret, config.AppConfig.JWTExpiresHours)
 	orderRepo := models.NewOrderRepository(database.DB)
-	if err := orderRepo.EnsureSchema(); err != nil {
-		log.Fatal("Failed to initialize order history schema:", err)
-	}
+	mustRunStartupStep("order history schema", orderRepo.EnsureSchema)
+
 	invoiceMatchRepo := models.NewInvoiceReconciliationRepository(database.DB)
-	if err := invoiceMatchRepo.EnsureSchema(); err != nil {
-		log.Fatal("Failed to initialize invoice reconciliation schema:", err)
-	}
+	mustRunStartupStep("invoice reconciliation schema", invoiceMatchRepo.EnsureSchema)
+
 	orderUnreadRepo := models.NewOrderUnreadRepository(database.DB)
-	if err := orderUnreadRepo.EnsureSchema(); err != nil {
-		log.Fatal("Failed to initialize unread schema:", err)
-	}
+	mustRunStartupStep("order unread schema", orderUnreadRepo.EnsureSchema)
+
 	companyContactRepo := models.NewCompanyContactRepository(database.DB)
-	if err := companyContactRepo.EnsureSchema(); err != nil {
-		log.Fatal("Failed to initialize company contacts schema:", err)
-	}
-	if err := companyContactRepo.SyncFromExistingData(models.DefaultCompanyContactEmail); err != nil {
-		log.Fatal("Failed to sync company contacts:", err)
-	}
-	if err := companyContactRepo.BackfillOrderReferences(); err != nil {
-		log.Fatal("Failed to backfill company contact relations:", err)
-	}
+	mustRunStartupStep("company contacts schema", companyContactRepo.EnsureSchema)
+
 	orderMailer := services.NewSMTPOrderMailer(
 		config.AppConfig.SMTPHost,
 		config.AppConfig.SMTPPort,
@@ -70,9 +86,7 @@ func main() {
 	wsHandler := handlers.NewWSHandler(userRepo, config.AppConfig.JWTSecret, realtimeHub)
 	orderHandler := handlers.NewOrderHandler(orderRepo, invoiceMatchRepo, orderUnreadRepo, companyContactRepo, userRepo, config.AppConfig.JWTSecret, orderMailer, realtimeHub)
 	forecastApprovalRepo := models.NewForecastApprovalRepository(database.DB)
-	if err := forecastApprovalRepo.EnsureSchema(); err != nil {
-		log.Fatal("Failed to initialize forecast approval schema:", err)
-	}
+	mustRunStartupStep("forecast approval schema", forecastApprovalRepo.EnsureSchema)
 	forecastApprovalHandler := handlers.NewForecastApprovalHandler(forecastApprovalRepo, userRepo, config.AppConfig.JWTSecret, realtimeHub)
 
 	hoaDonRepo := models.NewHoaDonRepository(database.DB)
@@ -165,6 +179,7 @@ func main() {
 
 	log.Printf("Server is running on http://localhost:%s", config.AppConfig.ServerPort)
 	log.Printf("API documentation available at http://localhost:%s/health", config.AppConfig.ServerPort)
+	go runCompanyContactWarmup(companyContactRepo)
 
 	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)
