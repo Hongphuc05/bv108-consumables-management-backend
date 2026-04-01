@@ -57,30 +57,10 @@ type SaveInvoiceReconciliationsBulkRequest struct {
 }
 
 type SaveInvoiceReconciliationItemRequest struct {
-	OrderHistoryID          int64   `json:"orderHistoryId"`
-	OrderBatchKey           string  `json:"orderBatchKey"`
-	CompanyContactID        *int64  `json:"companyContactId"`
-	NhaThau                 string  `json:"nhaThau"`
-	MaQuanLy                string  `json:"maQuanLy"`
-	MaVtytCu                string  `json:"maVtytCu"`
-	TenVtytBv               string  `json:"tenVtytBv"`
-	OrderedQty              int     `json:"orderedQty"`
-	OrderTime               string  `json:"orderTime"`
-	InvoiceNumber           string  `json:"invoiceNumber"`
-	InvoiceIDHoaDon         string  `json:"invoiceIdHoaDon"`
-	InvoiceRowID            *int64  `json:"invoiceRowId"`
-	InvoiceCompanyContactID *int64  `json:"invoiceCompanyContactId"`
-	InvoiceCompanyName      string  `json:"invoiceCompanyName"`
-	InvoiceItemCode         string  `json:"invoiceItemCode"`
-	InvoiceItemName         string  `json:"invoiceItemName"`
-	InvoiceQty              float64 `json:"invoiceQty"`
-	InvoiceTime             string  `json:"invoiceTime"`
-	HasInvoice              bool    `json:"hasInvoice"`
-	DetailStatus            string  `json:"detailStatus"`
-	DetailNote              string  `json:"detailNote"`
-	MatchScore              float64 `json:"matchScore"`
-	QuantityDiff            float64 `json:"quantityDiff"`
-	MatchedAt               *string `json:"matchedAt"`
+	ID     int64  `json:"id"`
+	Action string `json:"action"`
+	Note   string `json:"note"`
+	Status string `json:"status"`
 }
 
 func NewOrderHandler(repo *models.OrderRepository, invoiceMatchRepo *models.InvoiceReconciliationRepository, unreadRepo *models.OrderUnreadRepository, companyContactRepo *models.CompanyContactRepository, userRepo *models.UserRepository, jwtSecret string, mailer services.OrderEmailSender, hub *realtime.Hub) *OrderHandler {
@@ -102,8 +82,7 @@ func (h *OrderHandler) SaveInvoiceReconciliations(c *gin.Context) {
 		return
 	}
 
-	currentUser, err := h.getCurrentUser(c)
-	if err != nil {
+	if _, err := h.getCurrentUser(c); err != nil {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
 		return
 	}
@@ -119,79 +98,61 @@ func (h *OrderHandler) SaveInvoiceReconciliations(c *gin.Context) {
 		return
 	}
 
-	inputs := make([]models.UpsertInvoiceReconciliationInput, 0, len(req.Items))
+	noteUpdates := make([]models.UpdateInvoiceReconciliationNoteInput, 0, len(req.Items))
+	statusUpdates := make([]models.UpdateInvoiceReconciliationStatusInput, 0, len(req.Items))
 	for _, item := range req.Items {
-		if item.OrderHistoryID <= 0 {
+		if item.ID <= 0 {
 			continue
 		}
 
-		if !item.HasInvoice {
-			continue
-		}
-
-		invoiceNumber := strings.TrimSpace(item.InvoiceNumber)
-		if invoiceNumber == "" {
-			continue
-		}
-
-		matchedAt := time.Now().UTC()
-		if item.MatchedAt != nil {
-			if parsed, parsedOK := parseOptionalRFC3339(*item.MatchedAt); parsedOK {
-				matchedAt = parsed.UTC()
+		switch strings.ToLower(strings.TrimSpace(item.Action)) {
+		case "note":
+			noteUpdates = append(noteUpdates, models.UpdateInvoiceReconciliationNoteInput{
+				ID:   item.ID,
+				Note: strings.TrimSpace(item.Note),
+			})
+		case "status":
+			normalizedStatus := strings.ToLower(strings.TrimSpace(item.Status))
+			switch normalizedStatus {
+			case "", "done", "xong":
+				statusUpdates = append(statusUpdates, models.UpdateInvoiceReconciliationStatusInput{
+					ID:     item.ID,
+					Status: models.InvoiceReconciliationStatusDone,
+				})
+			case "waiting", "ch\u1edd":
+				statusUpdates = append(statusUpdates, models.UpdateInvoiceReconciliationStatusInput{
+					ID:     item.ID,
+					Status: models.InvoiceReconciliationStatusPending,
+				})
 			}
 		}
-
-		orderTime, _ := parseOptionalRFC3339(item.OrderTime)
-		invoiceTime, _ := parseOptionalRFC3339(item.InvoiceTime)
-
-		var matchedByUserID *int64
-		if currentUser.ID > 0 {
-			userID := currentUser.ID
-			matchedByUserID = &userID
-		}
-
-		inputs = append(inputs, models.UpsertInvoiceReconciliationInput{
-			OrderHistoryID:          item.OrderHistoryID,
-			OrderBatchKey:           strings.TrimSpace(item.OrderBatchKey),
-			CompanyContactID:        item.CompanyContactID,
-			NhaThau:                 sanitizeText(item.NhaThau),
-			MaQuanLy:                sanitizeText(item.MaQuanLy),
-			MaVtytCu:                sanitizeText(item.MaVtytCu),
-			TenVtytBv:               sanitizeText(item.TenVtytBv),
-			OrderedQty:              item.OrderedQty,
-			OrderTime:               orderTime,
-			InvoiceNumber:           invoiceNumber,
-			InvoiceIDHoaDon:         sanitizeText(item.InvoiceIDHoaDon),
-			InvoiceRowID:            item.InvoiceRowID,
-			InvoiceCompanyContactID: item.InvoiceCompanyContactID,
-			InvoiceCompanyName:      sanitizeText(item.InvoiceCompanyName),
-			InvoiceItemCode:         sanitizeText(item.InvoiceItemCode),
-			InvoiceItemName:         sanitizeText(item.InvoiceItemName),
-			InvoiceQty:              item.InvoiceQty,
-			InvoiceTime:             invoiceTime,
-			HasInvoice:              item.HasInvoice,
-			DetailStatus:            sanitizeText(item.DetailStatus),
-			DetailNote:              sanitizeText(item.DetailNote),
-			MatchScore:              item.MatchScore,
-			QuantityDiff:            item.QuantityDiff,
-			MatchedByUserID:         matchedByUserID,
-			MatchedByUsername:       currentUser.Username,
-			MatchedByEmail:          currentUser.Email,
-			MatchedAt:               matchedAt,
-		})
 	}
 
-	if len(inputs) == 0 {
+	if len(noteUpdates) == 0 && len(statusUpdates) == 0 {
 		c.JSON(http.StatusOK, gin.H{"message": "No valid invoice reconciliation items to save", "count": 0})
 		return
 	}
 
-	if err := h.invoiceMatchRepo.UpsertBulk(inputs); err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
-		return
+	var updatedCount int64
+	if len(noteUpdates) > 0 {
+		count, err := h.invoiceMatchRepo.UpdateNotesBulk(noteUpdates)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+			return
+		}
+		updatedCount += count
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Invoice reconciliation history saved", "count": len(inputs)})
+	if len(statusUpdates) > 0 {
+		count, err := h.invoiceMatchRepo.UpdateStatusesBulk(statusUpdates)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+			return
+		}
+		updatedCount += count
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Invoice reconciliation updated", "count": updatedCount})
 }
 
 func (h *OrderHandler) GetInvoiceReconciliationHistory(c *gin.Context) {
@@ -283,7 +244,7 @@ func (h *OrderHandler) GetMatchedOrderReconciliations(c *gin.Context) {
 		return
 	}
 
-	records, err := h.invoiceMatchRepo.ListAllMatchedReconciliations()
+	records, err := h.invoiceMatchRepo.ListAllReconciliations()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
 		return

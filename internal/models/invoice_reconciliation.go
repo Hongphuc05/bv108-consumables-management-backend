@@ -3,7 +3,18 @@ package models
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
+)
+
+const (
+	InvoiceReconciliationStatusPending = "waiting"
+	InvoiceReconciliationStatusDone    = "done"
+)
+
+const (
+	invoiceReconciliationLegacyStatusPending = "ch\u1edd"
+	invoiceReconciliationLegacyStatusDone    = "xong"
 )
 
 type InvoiceReconciliationRecord struct {
@@ -37,6 +48,8 @@ type InvoiceReconciliationRecord struct {
 	MatchedAt               time.Time  `json:"matchedAt"`
 	CreatedAt               time.Time  `json:"createdAt"`
 	UpdatedAt               time.Time  `json:"updatedAt"`
+	Note                    string     `json:"note,omitempty"`
+	Status                  string     `json:"status"`
 }
 
 type UpsertInvoiceReconciliationInput struct {
@@ -67,10 +80,22 @@ type UpsertInvoiceReconciliationInput struct {
 	MatchedByUsername       string
 	MatchedByEmail          string
 	MatchedAt               time.Time
+	Note                    string
+	Status                  string
 }
 
 type InvoiceReconciliationRepository struct {
 	DB *sql.DB
+}
+
+type UpdateInvoiceReconciliationNoteInput struct {
+	ID   int64
+	Note string
+}
+
+type UpdateInvoiceReconciliationStatusInput struct {
+	ID     int64
+	Status string
 }
 
 func NewInvoiceReconciliationRepository(db *sql.DB) *InvoiceReconciliationRepository {
@@ -123,6 +148,33 @@ func (r *InvoiceReconciliationRepository) EnsureSchema() error {
 		return fmt.Errorf("error ensuring order_invoice_reconciliation schema: %w", err)
 	}
 
+	if err := r.ensureColumnExists(
+		"order_invoice_reconciliation",
+		"note",
+		"ALTER TABLE order_invoice_reconciliation ADD COLUMN note TEXT NULL AFTER updated_at",
+	); err != nil {
+		return err
+	}
+
+	if err := r.ensureColumnExists(
+		"order_invoice_reconciliation",
+		"status",
+		fmt.Sprintf(
+			"ALTER TABLE order_invoice_reconciliation ADD COLUMN status VARCHAR(50) NOT NULL DEFAULT '%s' AFTER note",
+			InvoiceReconciliationStatusPending,
+		),
+	); err != nil {
+		return err
+	}
+
+	if err := r.ensureIndexExists(
+		"order_invoice_reconciliation",
+		"idx_oir_workflow_status",
+		"ALTER TABLE order_invoice_reconciliation ADD INDEX idx_oir_workflow_status (status)",
+	); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -131,107 +183,7 @@ func (r *InvoiceReconciliationRepository) UpsertBulk(inputs []UpsertInvoiceRecon
 		return nil
 	}
 
-	tx, err := r.DB.Begin()
-	if err != nil {
-		return fmt.Errorf("error starting invoice reconciliation transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	for _, item := range inputs {
-		if _, err := tx.Exec(`
-			INSERT INTO order_invoice_reconciliation (
-				order_history_id,
-				order_batch_key,
-				company_contact_id,
-				nha_thau,
-				ma_quan_ly,
-				ma_vtyt_cu,
-				ten_vtyt_bv,
-				ordered_qty,
-				order_time,
-				invoice_number,
-				invoice_id_hoa_don,
-				invoice_row_id,
-				invoice_company_contact_id,
-				invoice_company_name,
-				invoice_item_code,
-				invoice_item_name,
-				invoice_qty,
-				invoice_time,
-				has_invoice,
-				detail_status,
-				detail_note,
-				match_score,
-				quantity_diff,
-				matched_by_user_id,
-				matched_by_username,
-				matched_by_email,
-				matched_at
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON DUPLICATE KEY UPDATE
-				company_contact_id = VALUES(company_contact_id),
-				nha_thau = VALUES(nha_thau),
-				ma_quan_ly = VALUES(ma_quan_ly),
-				ma_vtyt_cu = VALUES(ma_vtyt_cu),
-				ten_vtyt_bv = VALUES(ten_vtyt_bv),
-				ordered_qty = VALUES(ordered_qty),
-				order_time = VALUES(order_time),
-				invoice_id_hoa_don = VALUES(invoice_id_hoa_don),
-				invoice_row_id = VALUES(invoice_row_id),
-				invoice_company_contact_id = VALUES(invoice_company_contact_id),
-				invoice_company_name = VALUES(invoice_company_name),
-				invoice_item_code = VALUES(invoice_item_code),
-				invoice_item_name = VALUES(invoice_item_name),
-				invoice_qty = VALUES(invoice_qty),
-				invoice_time = VALUES(invoice_time),
-				has_invoice = VALUES(has_invoice),
-				detail_status = VALUES(detail_status),
-				detail_note = VALUES(detail_note),
-				match_score = VALUES(match_score),
-				quantity_diff = VALUES(quantity_diff),
-				matched_by_user_id = VALUES(matched_by_user_id),
-				matched_by_username = VALUES(matched_by_username),
-				matched_by_email = VALUES(matched_by_email),
-				matched_at = VALUES(matched_at)
-		`,
-			item.OrderHistoryID,
-			item.OrderBatchKey,
-			nullableInt64Value(item.CompanyContactID),
-			item.NhaThau,
-			item.MaQuanLy,
-			item.MaVtytCu,
-			item.TenVtytBv,
-			item.OrderedQty,
-			nullableTimeValue(item.OrderTime),
-			item.InvoiceNumber,
-			item.InvoiceIDHoaDon,
-			nullableInt64Value(item.InvoiceRowID),
-			nullableInt64Value(item.InvoiceCompanyContactID),
-			item.InvoiceCompanyName,
-			item.InvoiceItemCode,
-			item.InvoiceItemName,
-			item.InvoiceQty,
-			nullableTimeValue(item.InvoiceTime),
-			boolToTinyInt(item.HasInvoice),
-			item.DetailStatus,
-			item.DetailNote,
-			item.MatchScore,
-			item.QuantityDiff,
-			nullableInt64Value(item.MatchedByUserID),
-			item.MatchedByUsername,
-			item.MatchedByEmail,
-			item.MatchedAt,
-		); err != nil {
-			return fmt.Errorf("error upserting invoice reconciliation: %w", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("error committing invoice reconciliation transaction: %w", err)
-	}
-
-	return nil
+	return fmt.Errorf("invoice reconciliation upsert is disabled; use UpdateNotesBulk or UpdateStatusesBulk")
 }
 
 func (r *InvoiceReconciliationRepository) ListByMonthYear(month, year int) ([]InvoiceReconciliationRecord, error) {
@@ -266,11 +218,13 @@ func (r *InvoiceReconciliationRepository) ListByMonthYear(month, year int) ([]In
 			matched_by_email,
 			matched_at,
 			created_at,
-			updated_at
+			updated_at,
+			note,
+			status
 		FROM order_invoice_reconciliation
-		WHERE MONTH(matched_at) = ? AND YEAR(matched_at) = ?
-		ORDER BY matched_at DESC, id DESC
-	`, month, year)
+		WHERE has_invoice = 1 AND status IN (?, ?)
+		ORDER BY updated_at DESC, matched_at DESC, id DESC
+	`, InvoiceReconciliationStatusDone, invoiceReconciliationLegacyStatusDone)
 	if err != nil {
 		return nil, fmt.Errorf("error listing invoice reconciliation history: %w", err)
 	}
@@ -286,6 +240,7 @@ func (r *InvoiceReconciliationRepository) ListByMonthYear(month, year int) ([]In
 		var invoiceTime sql.NullTime
 		var hasInvoice int
 		var matchedByUserID sql.NullInt64
+		var note sql.NullString
 
 		if err := rows.Scan(
 			&item.ID,
@@ -318,6 +273,8 @@ func (r *InvoiceReconciliationRepository) ListByMonthYear(month, year int) ([]In
 			&item.MatchedAt,
 			&item.CreatedAt,
 			&item.UpdatedAt,
+			&note,
+			&item.Status,
 		); err != nil {
 			return nil, fmt.Errorf("error scanning invoice reconciliation history: %w", err)
 		}
@@ -343,6 +300,10 @@ func (r *InvoiceReconciliationRepository) ListByMonthYear(month, year int) ([]In
 			item.InvoiceTime = &value
 		}
 		item.HasInvoice = hasInvoice == 1
+		item.Status = normalizeInvoiceReconciliationStatus(item.Status)
+		if note.Valid {
+			item.Note = note.String
+		}
 		if matchedByUserID.Valid {
 			value := matchedByUserID.Int64
 			item.MatchedByUserID = &value
@@ -389,7 +350,7 @@ func (r *InvoiceReconciliationRepository) ListMatchedInvoiceNumbers(month, year 
 	return invoiceNumbers, nil
 }
 
-func (r *InvoiceReconciliationRepository) ListAllMatchedReconciliations() ([]InvoiceReconciliationRecord, error) {
+func (r *InvoiceReconciliationRepository) ListAllReconciliations() ([]InvoiceReconciliationRecord, error) {
 	rows, err := r.DB.Query(`
 		SELECT
 			id,
@@ -421,13 +382,14 @@ func (r *InvoiceReconciliationRepository) ListAllMatchedReconciliations() ([]Inv
 			matched_by_email,
 			matched_at,
 			created_at,
-			updated_at
+			updated_at,
+			note,
+			status
 		FROM order_invoice_reconciliation
-		WHERE has_invoice = 1
-		ORDER BY matched_at DESC, id DESC
+		ORDER BY updated_at DESC, matched_at DESC, id DESC
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("error listing matched invoice reconciliations: %w", err)
+		return nil, fmt.Errorf("error listing invoice reconciliations: %w", err)
 	}
 	defer rows.Close()
 
@@ -441,6 +403,7 @@ func (r *InvoiceReconciliationRepository) ListAllMatchedReconciliations() ([]Inv
 		var invoiceTime sql.NullTime
 		var hasInvoice int
 		var matchedByUserID sql.NullInt64
+		var note sql.NullString
 
 		if err := rows.Scan(
 			&item.ID,
@@ -473,8 +436,10 @@ func (r *InvoiceReconciliationRepository) ListAllMatchedReconciliations() ([]Inv
 			&item.MatchedAt,
 			&item.CreatedAt,
 			&item.UpdatedAt,
+			&note,
+			&item.Status,
 		); err != nil {
-			return nil, fmt.Errorf("error scanning matched invoice reconciliation: %w", err)
+			return nil, fmt.Errorf("error scanning invoice reconciliation: %w", err)
 		}
 
 		if companyContactID.Valid {
@@ -498,6 +463,10 @@ func (r *InvoiceReconciliationRepository) ListAllMatchedReconciliations() ([]Inv
 			item.InvoiceTime = &value
 		}
 		item.HasInvoice = hasInvoice == 1
+		item.Status = normalizeInvoiceReconciliationStatus(item.Status)
+		if note.Valid {
+			item.Note = note.String
+		}
 		if matchedByUserID.Valid {
 			value := matchedByUserID.Int64
 			item.MatchedByUserID = &value
@@ -507,7 +476,7 @@ func (r *InvoiceReconciliationRepository) ListAllMatchedReconciliations() ([]Inv
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating matched invoice reconciliation history: %w", err)
+		return nil, fmt.Errorf("error iterating invoice reconciliation history: %w", err)
 	}
 
 	return records, nil
@@ -542,6 +511,91 @@ func (r *InvoiceReconciliationRepository) ListAllMatchedInvoiceNumbers() ([]stri
 	return invoiceNumbers, nil
 }
 
+func (r *InvoiceReconciliationRepository) UpdateNotesBulk(inputs []UpdateInvoiceReconciliationNoteInput) (int64, error) {
+	if len(inputs) == 0 {
+		return 0, nil
+	}
+
+	tx, err := r.DB.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("error starting invoice reconciliation note transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var updatedCount int64
+	for _, item := range inputs {
+		if item.ID <= 0 {
+			continue
+		}
+
+		result, err := tx.Exec(`
+			UPDATE order_invoice_reconciliation
+			SET note = ?, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?
+		`, item.Note, item.ID)
+		if err != nil {
+			return 0, fmt.Errorf("error updating invoice reconciliation note: %w", err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("error reading updated invoice reconciliation note rows: %w", err)
+		}
+		updatedCount += rowsAffected
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("error committing invoice reconciliation note transaction: %w", err)
+	}
+
+	return updatedCount, nil
+}
+
+func (r *InvoiceReconciliationRepository) UpdateStatusesBulk(inputs []UpdateInvoiceReconciliationStatusInput) (int64, error) {
+	if len(inputs) == 0 {
+		return 0, nil
+	}
+
+	tx, err := r.DB.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("error starting invoice reconciliation status transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var updatedCount int64
+	for _, item := range inputs {
+		if item.ID <= 0 {
+			continue
+		}
+
+		status := normalizeInvoiceReconciliationStatus(item.Status)
+		if status == "" {
+			continue
+		}
+
+		result, err := tx.Exec(`
+			UPDATE order_invoice_reconciliation
+			SET status = ?, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?
+		`, status, item.ID)
+		if err != nil {
+			return 0, fmt.Errorf("error updating invoice reconciliation status: %w", err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("error reading updated invoice reconciliation status rows: %w", err)
+		}
+		updatedCount += rowsAffected
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("error committing invoice reconciliation status transaction: %w", err)
+	}
+
+	return updatedCount, nil
+}
+
 func nullableInt64Value(value *int64) interface{} {
 	if value == nil {
 		return nil
@@ -561,4 +615,57 @@ func boolToTinyInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func normalizeInvoiceReconciliationStatus(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "waiting", "wait", "pending", invoiceReconciliationLegacyStatusPending:
+		return InvoiceReconciliationStatusPending
+	case "done", invoiceReconciliationLegacyStatusDone:
+		return InvoiceReconciliationStatusDone
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
+func (r *InvoiceReconciliationRepository) ensureColumnExists(tableName, columnName, alterStatement string) error {
+	var count int
+	if err := r.DB.QueryRow(`
+		SELECT COUNT(*)
+		FROM information_schema.columns
+		WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?
+	`, tableName, columnName).Scan(&count); err != nil {
+		return fmt.Errorf("error checking column %s.%s: %w", tableName, columnName, err)
+	}
+
+	if count > 0 {
+		return nil
+	}
+
+	if _, err := r.DB.Exec(alterStatement); err != nil {
+		return fmt.Errorf("error altering %s.%s: %w", tableName, columnName, err)
+	}
+
+	return nil
+}
+
+func (r *InvoiceReconciliationRepository) ensureIndexExists(tableName, indexName, alterStatement string) error {
+	var count int
+	if err := r.DB.QueryRow(`
+		SELECT COUNT(*)
+		FROM information_schema.statistics
+		WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?
+	`, tableName, indexName).Scan(&count); err != nil {
+		return fmt.Errorf("error checking index %s on %s: %w", indexName, tableName, err)
+	}
+
+	if count > 0 {
+		return nil
+	}
+
+	if _, err := r.DB.Exec(alterStatement); err != nil {
+		return fmt.Errorf("error creating index %s on %s: %w", indexName, tableName, err)
+	}
+
+	return nil
 }
