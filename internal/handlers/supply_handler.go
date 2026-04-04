@@ -407,6 +407,32 @@ func (h *SupplyHandler) CompareSupplies(c *gin.Context) {
 // @Tags health
 // @Success 200 {object} map[string]string
 // @Router /health [get]
+// GetForecastCatalog retrieves non-zero supplies for forecast processing
+// @Summary Get forecast supply catalog
+// @Description Get supplies that have inventory activity, optimized for the forecast screen
+// @Tags supplies
+// @Param keyword query string false "Search keyword"
+// @Success 200 {object} gin.H
+// @Failure 500 {object} ErrorResponse
+// @Router /api/supplies/forecast-catalog [get]
+func (h *SupplyHandler) GetForecastCatalog(c *gin.Context) {
+	keyword := c.Query("keyword")
+
+	supplies, err := h.repo.GetForecastCatalog(keyword)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error:   "DATABASE_ERROR",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  supplies,
+		"total": len(supplies),
+	})
+}
+
 func HealthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "OK",

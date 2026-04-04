@@ -593,3 +593,51 @@ func (r *SupplyRepository) GetCompareByLibraryCodes(maThuVien []string) ([]Compa
 
 	return items, nil
 }
+
+// GetForecastCatalog retrieves all supplies that might be included in a forecast (non-zero inventory activity).
+// No pagination is applied because the client needs the full subset to compute forecast states.
+func (r *SupplyRepository) GetForecastCatalog(keyword string) ([]Supply, error) {
+	searchPattern := "%" + keyword + "%"
+
+	query := `
+		SELECT 
+			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
+			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
+			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
+		FROM supplies
+		WHERE (TONDAUKY != 0 OR NHAPTRONGKY != 0 OR XUATTRONGKY != 0 OR TONGNHAP != 0)
+	`
+	
+	args := []interface{}{}
+	if keyword != "" {
+		query += " AND (NAME LIKE ? OR ID LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?)"
+		args = append(args, searchPattern, searchPattern, searchPattern, searchPattern)
+	}
+	
+	query += " ORDER BY IDX1"
+
+	rows, err := r.DB.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("error querying forecast catalog: %w", err)
+	}
+	defer rows.Close()
+
+	supplies := []Supply{}
+	for rows.Next() {
+		var s Supply
+		err := rows.Scan(
+			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
+			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
+			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
+			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("error scanning supply: %w", err)
+		}
+
+		s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
+		supplies = append(supplies, s)
+	}
+
+	return supplies, nil
+}
