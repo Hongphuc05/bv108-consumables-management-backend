@@ -195,6 +195,17 @@ go build -o server.exe cmd/server/main.go
 - Kiểm tra `FRONTEND_URL` trong `.env`
 - Thêm domain của frontend vào CORS config trong `main.go`
 
+## ☁️ Deploy Azure
+
+Hướng dẫn deploy FE + BE thủ công lên Azure Container Apps nằm tại:
+
+`DEPLOY_AZURE_FE_BE.md`
+
+Tài liệu này ưu tiên đường deploy đã chạy ổn trên máy hiện tại:
+- `PowerShell` Windows
+- `docker build` + `docker push`
+- `az containerapp update`
+
 ## 📝 Notes
 
 - Server mặc định chạy ở port 8080

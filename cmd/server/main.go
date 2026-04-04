@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,12 +19,55 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type startupStep struct {
+	name string
+	run  func() error
+}
+
 func mustRunStartupStep(stepName string, fn func() error) {
 	startedAt := time.Now()
 	if err := fn(); err != nil {
 		log.Fatalf("%s failed: %v", stepName, err)
 	}
 	log.Printf("[startup] %s completed in %s", stepName, time.Since(startedAt).Round(time.Millisecond))
+}
+
+func mustRunStartupStepsParallel(steps ...startupStep) {
+	if len(steps) == 0 {
+		return
+	}
+
+	type startupError struct {
+		name string
+		err  error
+	}
+
+	var wg sync.WaitGroup
+	errCh := make(chan startupError, len(steps))
+
+	for _, step := range steps {
+		step := step
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			startedAt := time.Now()
+			if err := step.run(); err != nil {
+				errCh <- startupError{name: step.name, err: err}
+				return
+			}
+
+			log.Printf("[startup] %s completed in %s", step.name, time.Since(startedAt).Round(time.Millisecond))
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	if startupErr, ok := <-errCh; ok {
+		log.Fatalf("%s failed: %v", startupErr.name, startupErr.err)
+	}
 }
 
 func runCompanyContactWarmup(repo *models.CompanyContactRepository) {
@@ -44,6 +88,8 @@ func runCompanyContactWarmup(repo *models.CompanyContactRepository) {
 }
 
 func main() {
+	bootstrapStartedAt := time.Now()
+
 	// Load configuration
 	if err := config.LoadConfig(); err != nil {
 		log.Fatal("Failed to load configuration:", err)
@@ -64,15 +110,17 @@ func main() {
 	userRepo := models.NewUserRepository(database.DB)
 	authHandler := handlers.NewAuthHandler(userRepo, config.AppConfig.JWTSecret, config.AppConfig.JWTExpiresHours)
 	orderRepo := models.NewOrderRepository(database.DB)
-	mustRunStartupStep("order history schema", orderRepo.EnsureSchema)
-
 	invoiceMatchRepo := models.NewInvoiceReconciliationRepository(database.DB)
-	mustRunStartupStep("invoice reconciliation schema", invoiceMatchRepo.EnsureSchema)
-
 	orderUnreadRepo := models.NewOrderUnreadRepository(database.DB)
-	mustRunStartupStep("order unread schema", orderUnreadRepo.EnsureSchema)
-
 	companyContactRepo := models.NewCompanyContactRepository(database.DB)
+	forecastApprovalRepo := models.NewForecastApprovalRepository(database.DB)
+
+	mustRunStartupStepsParallel(
+		startupStep{name: "order history schema", run: orderRepo.EnsureSchema},
+		startupStep{name: "invoice reconciliation schema", run: invoiceMatchRepo.EnsureSchema},
+		startupStep{name: "order unread schema", run: orderUnreadRepo.EnsureSchema},
+		startupStep{name: "forecast approval schema", run: forecastApprovalRepo.EnsureSchema},
+	)
 	mustRunStartupStep("company contacts schema", companyContactRepo.EnsureSchema)
 
 	orderMailer := services.NewSMTPOrderMailer(
@@ -85,8 +133,6 @@ func main() {
 	realtimeHub := realtime.NewHub()
 	wsHandler := handlers.NewWSHandler(userRepo, config.AppConfig.JWTSecret, realtimeHub)
 	orderHandler := handlers.NewOrderHandler(orderRepo, invoiceMatchRepo, orderUnreadRepo, companyContactRepo, userRepo, config.AppConfig.JWTSecret, orderMailer, realtimeHub)
-	forecastApprovalRepo := models.NewForecastApprovalRepository(database.DB)
-	mustRunStartupStep("forecast approval schema", forecastApprovalRepo.EnsureSchema)
 	forecastApprovalHandler := handlers.NewForecastApprovalHandler(forecastApprovalRepo, userRepo, config.AppConfig.JWTSecret, realtimeHub)
 
 	hoaDonRepo := models.NewHoaDonRepository(database.DB)
@@ -179,6 +225,7 @@ func main() {
 
 	log.Printf("Server is running on http://localhost:%s", config.AppConfig.ServerPort)
 	log.Printf("API documentation available at http://localhost:%s/health", config.AppConfig.ServerPort)
+	log.Printf("[startup] bootstrap completed in %s", time.Since(bootstrapStartedAt).Round(time.Millisecond))
 	go runCompanyContactWarmup(companyContactRepo)
 
 	// Wait for interrupt signal to gracefully shutdown the server
