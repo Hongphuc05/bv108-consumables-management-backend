@@ -607,13 +607,13 @@ func (r *SupplyRepository) GetForecastCatalog(keyword string) ([]Supply, error) 
 		FROM supplies
 		WHERE (TONDAUKY != 0 OR NHAPTRONGKY != 0 OR XUATTRONGKY != 0 OR TONGNHAP != 0)
 	`
-	
+
 	args := []interface{}{}
 	if keyword != "" {
 		query += " AND (NAME LIKE ? OR ID LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?)"
 		args = append(args, searchPattern, searchPattern, searchPattern, searchPattern)
 	}
-	
+
 	query += " ORDER BY IDX1"
 
 	rows, err := r.DB.Query(query, args...)
