@@ -177,6 +177,7 @@ func main() {
 			supplies.GET("/compare-level1", supplyHandler.GetCompareLevel1Options) // GET /api/supplies/compare-level1
 			supplies.GET("/compare-level2", supplyHandler.GetCompareLevel2Options) // GET /api/supplies/compare-level2?level1=xxx
 			supplies.GET("/compare-catalog", supplyHandler.GetCompareCatalog)      // GET /api/supplies/compare-catalog?page=1&pageSize=20&keyword=xxx&level1Filter=xxx&level2Filter=yyy
+			supplies.GET("/forecast-catalog", supplyHandler.GetForecastCatalog)
 			supplies.POST("/compare", supplyHandler.CompareSupplies)               // POST /api/supplies/compare
 			supplies.GET("/:id", supplyHandler.GetSupplyByID)                      // GET /api/supplies/:id
 		}
