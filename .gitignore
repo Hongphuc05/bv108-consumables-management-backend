@@ -31,6 +31,6 @@ go.work
 .DS_Store
 Thumbs.db
 
-
+*.md
 __pycache__/
 *.csv
