@@ -114,6 +114,7 @@ func main() {
 	orderUnreadRepo := models.NewOrderUnreadRepository(database.DB)
 	companyContactRepo := models.NewCompanyContactRepository(database.DB)
 	forecastApprovalRepo := models.NewForecastApprovalRepository(database.DB)
+	schemaMaintenanceRepo := models.NewSchemaMaintenanceRepository(database.DB)
 
 	mustRunStartupStepsParallel(
 		startupStep{name: "order history schema", run: orderRepo.EnsureSchema},
@@ -122,6 +123,7 @@ func main() {
 		startupStep{name: "forecast approval schema", run: forecastApprovalRepo.EnsureSchema},
 	)
 	mustRunStartupStep("company contacts schema", companyContactRepo.EnsureSchema)
+	mustRunStartupStep("relational schema", schemaMaintenanceRepo.EnsureRelationalIntegrity)
 
 	orderMailer := services.NewSMTPOrderMailer(
 		config.AppConfig.SMTPHost,
@@ -227,7 +229,6 @@ func main() {
 	log.Printf("Server is running on http://localhost:%s", config.AppConfig.ServerPort)
 	log.Printf("API documentation available at http://localhost:%s/health", config.AppConfig.ServerPort)
 	log.Printf("[startup] bootstrap completed in %s", time.Since(bootstrapStartedAt).Round(time.Millisecond))
-	go runCompanyContactWarmup(companyContactRepo)
 
 	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)
