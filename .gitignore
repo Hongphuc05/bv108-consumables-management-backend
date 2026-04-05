@@ -32,5 +32,6 @@ go.work
 Thumbs.db
 
 *.md
+DEPLOY_AZURE_FE_BE.md
 __pycache__/
 *.csv
