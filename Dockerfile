@@ -11,7 +11,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/server ./cmd/server/m
 
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata python3 py3-pip \
+RUN apk add --no-cache ca-certificates tzdata python3 py3-pip font-dejavu \
     && ln -sf /usr/bin/python3 /usr/bin/python
 
 WORKDIR /app
