@@ -364,6 +364,11 @@ func (h *OrderHandler) CreateForecastOrders(c *gin.Context) {
 		return
 	}
 
+	if !userHasAnyRole(currentUser, RoleAdmin, RoleChiHuyKhoa) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Chi huy khoa (or Admin) can move approved forecasts to pending orders"})
+		return
+	}
+
 	var req CreateForecastOrdersRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "Invalid forecast order payload"})
@@ -506,6 +511,11 @@ func (h *OrderHandler) PlaceOrders(c *gin.Context) {
 	currentUser, err := h.getCurrentUser(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !userHasAnyRole(currentUser, RoleAdmin, RoleChiHuyKhoa, RoleThuKho, RoleNhanVienThau) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin, Chi huy khoa, Thu kho, or Nhan vien thau can place orders"})
 		return
 	}
 

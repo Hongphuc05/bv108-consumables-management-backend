@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	ForecastApprovalStatusApproved = "approved"
-	ForecastApprovalStatusRejected = "rejected"
-	ForecastApprovalStatusEdited   = "edited"
+	ForecastApprovalStatusApproved  = "approved"
+	ForecastApprovalStatusRejected  = "rejected"
+	ForecastApprovalStatusEdited    = "edited"
+	ForecastApprovalStatusSubmitted = "submitted"
 )
 
 type ForecastApprovalRecord struct {
@@ -479,10 +480,10 @@ func (r *ForecastApprovalRepository) listApprovalHistory(limit, month, year int)
 			nguoi_duyet_email,
 			thoi_gian_duyet
 		FROM forecast_approvals
-		WHERE status IN (?, ?)
+		WHERE status IN (?, ?, ?)
 	`)
 
-	args := []interface{}{ForecastApprovalStatusApproved, ForecastApprovalStatusRejected}
+	args := []interface{}{ForecastApprovalStatusApproved, ForecastApprovalStatusRejected, ForecastApprovalStatusSubmitted}
 	if month > 0 {
 		queryBuilder.WriteString(" AND forecast_month = ?")
 		args = append(args, month)
@@ -596,9 +597,10 @@ func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonth
 	defer rows.Close()
 
 	type monthBucket struct {
-		record           ForecastMonthlyHistoryRecord
-		approvedOrEdited int
-		rejected         int
+		record   ForecastMonthlyHistoryRecord
+		approved int
+		inReview int
+		rejected int
 	}
 
 	buckets := map[string]*monthBucket{}
@@ -696,8 +698,10 @@ func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonth
 
 		if status == ForecastApprovalStatusRejected {
 			bucket.rejected++
+		} else if status == ForecastApprovalStatusApproved {
+			bucket.approved++
 		} else {
-			bucket.approvedOrEdited++
+			bucket.inReview++
 		}
 	}
 
@@ -711,7 +715,7 @@ func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonth
 		if total > 0 {
 			if bucket.rejected == total {
 				bucket.record.TrangThai = "rejected"
-			} else if bucket.approvedOrEdited == total {
+			} else if bucket.approved == total {
 				bucket.record.TrangThai = "approved"
 			} else {
 				bucket.record.TrangThai = "partial"
@@ -740,6 +744,8 @@ func actionTypeFromStatus(status string) string {
 		return "approve"
 	case ForecastApprovalStatusRejected:
 		return "reject"
+	case ForecastApprovalStatusSubmitted:
+		return "submit"
 	case ForecastApprovalStatusEdited:
 		return "edit"
 	default:

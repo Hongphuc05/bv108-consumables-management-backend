@@ -55,7 +55,7 @@ func LoadConfig() error {
 		ServerPort:      serverPort,
 		GinMode:         getEnv("GIN_MODE", "debug"),
 		FrontendURL:     getEnv("FRONTEND_URL", "http://localhost:5173"),
-		JWTSecret:       getEnv("JWT_SECRET", "key_for_jwt"),
+		JWTSecret:       getEnv("JWT_SECRET", ""),
 		JWTExpiresHours: getEnvAsInt("JWT_EXPIRES_HOURS", 8),
 	}
 
