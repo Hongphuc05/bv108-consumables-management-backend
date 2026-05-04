@@ -70,6 +70,7 @@ type ForecastMonthlyHistoryItem struct {
 	STT        int64  `json:"stt"`
 	MaVtyt     string `json:"maVtyt"`
 	TenVtyt    string `json:"tenVtyt"`
+	TypeName   string `json:"typeName"`
 	QuyCach    string `json:"quyCach"`
 	DonViTinh  string `json:"donViTinh"`
 	DuTru      int    `json:"duTru"`
@@ -570,6 +571,7 @@ func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonth
 			fa.thoi_gian_duyet,
 			COALESCE(s.QUY_CACH_DONG_GOI, ''),
 			COALESCE(s.UNIT, ''),
+			COALESCE(s.TYPENAME, ''),
 			COALESCE(s.PRICE, 0)
 		FROM forecast_approvals fa
 		LEFT JOIN (
@@ -619,6 +621,7 @@ func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonth
 			ngayDuyet  string
 			quyCach    string
 			donViTinh  string
+			typeName   string
 			donGia     float64
 		)
 
@@ -635,6 +638,7 @@ func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonth
 			&ngayDuyet,
 			&quyCach,
 			&donViTinh,
+			&typeName,
 			&donGia,
 		); err != nil {
 			return nil, fmt.Errorf("error scanning monthly forecast change history row: %w", err)
@@ -676,6 +680,7 @@ func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonth
 			STT:        itemID,
 			MaVtyt:     maVtyt,
 			TenVtyt:    tenVtyt,
+			TypeName:   typeName,
 			QuyCach:    quyCach,
 			DonViTinh:  donViTinh,
 			DuTru:      duTru,
