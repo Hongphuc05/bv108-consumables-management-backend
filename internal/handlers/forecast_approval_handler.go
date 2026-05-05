@@ -132,6 +132,12 @@ func (h *ForecastApprovalHandler) SaveForecastApproval(c *gin.Context) {
 		return
 	}
 
+	// Validate that the month/year is not in the past
+	if err := validateForecastMonthNotInPast(req.ForecastMonth, req.ForecastYear); err != nil {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: err.Error()})
+		return
+	}
+
 	statusByItemKey, err := h.getForecastStatusByPeriod(req.ForecastMonth, req.ForecastYear)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
@@ -174,6 +180,14 @@ func (h *ForecastApprovalHandler) SaveForecastApprovalsBulk(c *gin.Context) {
 	if len(req.Items) == 0 {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "At least one approval item is required"})
 		return
+	}
+
+	// Validate that all month/years are not in the past
+	for _, item := range req.Items {
+		if err := validateForecastMonthNotInPast(item.ForecastMonth, item.ForecastYear); err != nil {
+			c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: err.Error()})
+			return
+		}
 	}
 
 	statusCacheByPeriod := make(map[string]map[string]string)
@@ -434,4 +448,18 @@ func forecastApprovalStatusKey(maQuanLy, maVtytCu string) string {
 	}
 
 	return normalizedMaQuanLy
+}
+
+// validateForecastMonthNotInPast checks if the given month/year is not in the past
+// Returns an error if the month/year is before the current month/year
+func validateForecastMonthNotInPast(month, year int) error {
+	now := time.Now()
+	currentYear := now.Year()
+	currentMonth := int(now.Month())
+
+	if year < currentYear || (year == currentYear && month < currentMonth) {
+		return fmt.Errorf("cannot modify forecasts for past months (current month: %d/%d, requested: %d/%d)", currentMonth, currentYear, month, year)
+	}
+
+	return nil
 }
