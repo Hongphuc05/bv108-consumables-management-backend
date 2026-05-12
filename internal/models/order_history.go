@@ -464,6 +464,191 @@ func (r *OrderRepository) ListOrderHistory() ([]OrderHistoryRecord, error) {
 	return history, nil
 }
 
+func (r *OrderRepository) GetOrderHistoryByIDs(orderIDs []int64) ([]OrderHistoryRecord, error) {
+	if len(orderIDs) == 0 {
+		return []OrderHistoryRecord{}, nil
+	}
+
+	placeholders := makePlaceholders(len(orderIDs))
+	args := make([]interface{}, len(orderIDs))
+	for index, orderID := range orderIDs {
+		args[index] = orderID
+	}
+
+	rows, err := r.DB.Query(fmt.Sprintf(`
+		SELECT
+			id,
+			company_contact_id,
+			nha_thau,
+			ma_quan_ly,
+			ma_vtyt_cu,
+			ten_vtyt_bv,
+			ma_hieu,
+			hang_sx,
+			don_vi_tinh,
+			quy_cach,
+			so_luong,
+			email,
+			source,
+			nguoi_phe_duyet,
+			nguoi_phe_duyet_email,
+			thoi_gian_phe_duyet,
+			nguoi_tao_don,
+			nguoi_tao_don_email,
+			ngay_tao,
+			ngay_dat_hang,
+			trang_thai,
+			email_sent,
+			nguoi_dat_hang,
+			nguoi_dat_hang_email
+		FROM order_history
+		WHERE id IN (%s)
+		ORDER BY ngay_dat_hang DESC, id DESC
+	`, placeholders), args...)
+	if err != nil {
+		return nil, fmt.Errorf("error loading order history by ids: %w", err)
+	}
+	defer rows.Close()
+
+	history := make([]OrderHistoryRecord, 0)
+	for rows.Next() {
+		var item OrderHistoryRecord
+		var companyContactID sql.NullInt64
+		var emailSent int
+		if err := rows.Scan(
+			&item.ID,
+			&companyContactID,
+			&item.NhaThau,
+			&item.MaQuanLy,
+			&item.MaVtytCu,
+			&item.TenVtytBv,
+			&item.MaHieu,
+			&item.HangSx,
+			&item.DonViTinh,
+			&item.QuyCach,
+			&item.DotGoiHang,
+			&item.Email,
+			&item.Source,
+			&item.NguoiPheDuyet,
+			&item.NguoiPheDuyetEmail,
+			&item.ThoiGianPheDuyet,
+			&item.NguoiTaoDon,
+			&item.NguoiTaoDonEmail,
+			&item.NgayTao,
+			&item.NgayDatHang,
+			&item.TrangThai,
+			&emailSent,
+			&item.NguoiDatHang,
+			&item.NguoiDatHangEmail,
+		); err != nil {
+			return nil, fmt.Errorf("error scanning order history by ids: %w", err)
+		}
+		if companyContactID.Valid {
+			value := companyContactID.Int64
+			item.CompanyContactID = &value
+		}
+		item.EmailSent = emailSent == 1
+		history = append(history, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating order history by ids: %w", err)
+	}
+
+	assignOrderBatchKeys(history)
+
+	return history, nil
+}
+
+func (r *OrderRepository) RepeatOrderHistory(history []OrderHistoryRecord, placedBy OrderActor) (int, error) {
+	if len(history) == 0 {
+		return 0, nil
+	}
+
+	tx, err := r.DB.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("error starting repeat history transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	placedAt := currentTimestamp()
+	for _, order := range history {
+		var companyContactID interface{}
+		if order.CompanyContactID != nil {
+			companyContactID = *order.CompanyContactID
+		}
+
+		if _, err := tx.Exec(`
+			INSERT INTO order_history (
+				pending_order_id,
+				company_contact_id,
+				nha_thau,
+				ma_quan_ly,
+				ma_vtyt_cu,
+				ten_vtyt_bv,
+				ma_hieu,
+				hang_sx,
+				don_vi_tinh,
+				quy_cach,
+				so_luong,
+				email,
+				source,
+				nguoi_phe_duyet_id,
+				nguoi_phe_duyet,
+				nguoi_phe_duyet_email,
+				thoi_gian_phe_duyet,
+				nguoi_tao_don_id,
+				nguoi_tao_don,
+				nguoi_tao_don_email,
+				ngay_tao,
+				ngay_dat_hang,
+				trang_thai,
+				email_sent,
+				nguoi_dat_hang_id,
+				nguoi_dat_hang,
+				nguoi_dat_hang_email
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+			nil,
+			companyContactID,
+			order.NhaThau,
+			order.MaQuanLy,
+			order.MaVtytCu,
+			order.TenVtytBv,
+			order.MaHieu,
+			order.HangSx,
+			order.DonViTinh,
+			order.QuyCach,
+			order.DotGoiHang,
+			order.Email,
+			order.Source,
+			nil,
+			order.NguoiPheDuyet,
+			order.NguoiPheDuyetEmail,
+			order.ThoiGianPheDuyet,
+			nil,
+			order.NguoiTaoDon,
+			order.NguoiTaoDonEmail,
+			order.NgayTao,
+			placedAt,
+			"Đã gửi email",
+			1,
+			placedBy.ID,
+			placedBy.Username,
+			placedBy.Email,
+		); err != nil {
+			return 0, fmt.Errorf("error inserting repeated order history: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("error committing repeated order history: %w", err)
+	}
+
+	return len(history), nil
+}
+
 func assignOrderBatchKeys(history []OrderHistoryRecord) {
 	if len(history) == 0 {
 		return

@@ -438,9 +438,6 @@ func buildCompanyIdentityKey(companyName, taxID string) string {
 
 func (r *CompanyContactRepository) Search(keyword string, limit int) ([]CompanyContact, error) {
 	trimmedKeyword := strings.TrimSpace(keyword)
-	if trimmedKeyword == "" {
-		return []CompanyContact{}, nil
-	}
 
 	if limit <= 0 {
 		limit = 8
@@ -449,16 +446,20 @@ func (r *CompanyContactRepository) Search(keyword string, limit int) ([]CompanyC
 		limit = 20
 	}
 
-	searchPattern := "%" + trimmedKeyword + "%"
 	query := `
 		SELECT id, identity_key, company_name, tax_id, email
 		FROM company_contacts
-		WHERE company_name LIKE ? OR tax_id LIKE ?
-		ORDER BY company_name ASC
-		LIMIT ?
 	`
+	args := make([]interface{}, 0, 3)
+	if trimmedKeyword != "" {
+		searchPattern := "%" + trimmedKeyword + "%"
+		query += "\tWHERE company_name LIKE ? OR tax_id LIKE ?\n"
+		args = append(args, searchPattern, searchPattern)
+	}
+	query += "\tORDER BY company_name ASC\n\tLIMIT ?\n"
+	args = append(args, limit)
 
-	rows, err := r.DB.Query(query, searchPattern, searchPattern, limit)
+	rows, err := r.DB.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("error searching company contacts: %w", err)
 	}

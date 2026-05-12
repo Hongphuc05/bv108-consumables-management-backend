@@ -305,10 +305,6 @@ func (h *OrderHandler) SearchCompanyContacts(c *gin.Context) {
 	}
 
 	keyword := strings.TrimSpace(c.Query("keyword"))
-	if keyword == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "keyword is required"})
-		return
-	}
 
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "8"))
 	if limit < 1 {
@@ -588,6 +584,91 @@ func (h *OrderHandler) PlaceOrders(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "Orders placed and email sent successfully",
+		"placedCount": placedCount,
+	})
+}
+
+func (h *OrderHandler) RepeatOrderHistory(c *gin.Context) {
+	currentUser, err := h.getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !userHasAnyRole(currentUser, RoleAdmin, RoleChiHuyKhoa, RoleThuKho, RoleNhanVienThau) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin, Chi huy khoa, Thu kho, or Nhan vien thau can place orders"})
+		return
+	}
+
+	var req PlaceOrdersRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "Invalid place order payload"})
+		return
+	}
+
+	if len(req.OrderIDs) == 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "At least one order id is required"})
+		return
+	}
+
+	historyOrders, err := h.repo.GetOrderHistoryByIDs(req.OrderIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	if len(historyOrders) == 0 {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "No order history found"})
+		return
+	}
+
+	if countUniqueOrderIDs(req.OrderIDs) != len(historyOrders) {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "Some order history records were not found"})
+		return
+	}
+
+	pendingOrders := make([]models.PendingOrder, 0, len(historyOrders))
+	for _, order := range historyOrders {
+		pendingOrders = append(pendingOrders, order.PendingOrder)
+	}
+
+	if err := h.sendPlacedOrderEmails(pendingOrders); err != nil {
+		c.JSON(http.StatusBadGateway, ErrorResponse{Error: "EMAIL_SEND_ERROR", Message: err.Error()})
+		return
+	}
+
+	placedCount, err := h.repo.RepeatOrderHistory(historyOrders, models.OrderActor{
+		ID:       currentUser.ID,
+		Username: currentUser.Username,
+		Email:    currentUser.Email,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	if h.hub != nil && placedCount > 0 {
+		now := time.Now().UTC()
+		h.hub.Broadcast("orders.updated", gin.H{
+			"action":    "repeated",
+			"count":     placedCount,
+			"updatedBy": currentUser.Username,
+			"updatedAt": now.Format(time.RFC3339Nano),
+		})
+
+		broadcastActivityNotification(h.hub, ActivityNotificationPayload{
+			Category:   "orders",
+			Action:     "orders.repeated",
+			ActorID:    currentUser.ID,
+			ActorName:  currentUser.Username,
+			ActorEmail: currentUser.Email,
+			Count:      placedCount,
+			CreatedAt:  now.Format(time.RFC3339Nano),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":     "Orders repeated and email sent successfully",
 		"placedCount": placedCount,
 	})
 }

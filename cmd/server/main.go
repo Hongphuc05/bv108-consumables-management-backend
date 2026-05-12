@@ -204,6 +204,7 @@ func main() {
 			orders.POST("/pending/forecast", orderHandler.CreateForecastOrders)
 			orders.POST("/pending/manual", orderHandler.CreateManualOrder)
 			orders.POST("/place", orderHandler.PlaceOrders)
+			orders.POST("/history/reorder", orderHandler.RepeatOrderHistory)
 			orders.POST("/invoice-reconciliations/bulk", orderHandler.SaveInvoiceReconciliations)
 			orders.POST("/alerts/suppliers/seen", orderHandler.MarkSupplierAlertSeen)
 			orders.POST("/groups/seen", orderHandler.MarkGroupsSeen)
