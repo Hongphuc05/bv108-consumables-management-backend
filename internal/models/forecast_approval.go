@@ -201,11 +201,34 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 		return fmt.Errorf("error ensuring forecast monthly snapshot schema: %w", err)
 	}
 
-	if err := r.BackfillMonthlySnapshots(); err != nil {
+	needsBackfill, err := r.NeedsMonthlySnapshotBackfill()
+	if err != nil {
 		return err
+	}
+	if needsBackfill {
+		if err := r.BackfillMonthlySnapshots(); err != nil {
+			return err
+		}
 	}
 
 	return nil
+}
+
+func (r *ForecastApprovalRepository) NeedsMonthlySnapshotBackfill() (bool, error) {
+	var missingCount int
+	if err := r.DB.QueryRow(`
+		SELECT COUNT(*)
+		FROM forecast_approvals fa
+		LEFT JOIN forecast_monthly_snapshots fms
+			ON fms.forecast_year = fa.forecast_year
+			AND fms.forecast_month = fa.forecast_month
+			AND fms.ma_vtyt_cu = fa.ma_vtyt_cu
+		WHERE fms.id IS NULL
+	`).Scan(&missingCount); err != nil {
+		return false, fmt.Errorf("error checking forecast monthly snapshot backfill state: %w", err)
+	}
+
+	return missingCount > 0, nil
 }
 
 func (r *ForecastApprovalRepository) BackfillMonthlySnapshots() error {

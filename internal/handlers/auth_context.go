@@ -3,6 +3,8 @@ package handlers
 import (
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"bv108-consumables-management-backend/internal/models"
 
@@ -10,10 +12,29 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+const currentUserCacheTTL = 30 * time.Second
+
+type currentUserCacheEntry struct {
+	profile   models.UserProfile
+	expiresAt time.Time
+}
+
+var currentUserCache sync.Map
+
 func getCurrentUserFromAuthorizationHeader(c *gin.Context, userRepo *models.UserRepository, jwtSecret []byte) (*models.UserProfile, error) {
 	userID, err := getUserIDFromAuthorizationHeader(c, jwtSecret)
 	if err != nil {
 		return nil, err
+	}
+
+	now := time.Now()
+	if cached, ok := currentUserCache.Load(userID); ok {
+		entry := cached.(currentUserCacheEntry)
+		if now.Before(entry.expiresAt) {
+			profile := entry.profile
+			return &profile, nil
+		}
+		currentUserCache.Delete(userID)
 	}
 
 	user, err := userRepo.GetByID(userID)
@@ -22,7 +43,16 @@ func getCurrentUserFromAuthorizationHeader(c *gin.Context, userRepo *models.User
 	}
 
 	profile := user.ToProfile()
+	currentUserCache.Store(userID, currentUserCacheEntry{
+		profile:   profile,
+		expiresAt: now.Add(currentUserCacheTTL),
+	})
+
 	return &profile, nil
+}
+
+func invalidateCurrentUserCache(userID int64) {
+	currentUserCache.Delete(userID)
 }
 
 func getUserIDFromAuthorizationHeader(c *gin.Context, jwtSecret []byte) (int64, error) {
@@ -68,4 +98,3 @@ func getUserIDFromAuthorizationHeader(c *gin.Context, jwtSecret []byte) (int64, 
 
 	return userID, nil
 }
-

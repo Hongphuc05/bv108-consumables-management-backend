@@ -249,6 +249,8 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 		return
 	}
 
+	invalidateCurrentUserCache(userID)
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Profile updated successfully",
 		"user":    updatedUser.ToProfile(),
