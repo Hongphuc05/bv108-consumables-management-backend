@@ -3,7 +3,6 @@ package models
 import (
 	"database/sql"
 	"fmt"
-	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -158,6 +157,164 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 
 	if _, err := r.DB.Exec(historyStatement); err != nil {
 		return fmt.Errorf("error ensuring forecast change history schema: %w", err)
+	}
+
+	snapshotStatement := `
+		CREATE TABLE IF NOT EXISTS forecast_monthly_snapshots (
+			id BIGINT NOT NULL AUTO_INCREMENT,
+			source_approval_id BIGINT NULL,
+			forecast_year INT NOT NULL,
+			forecast_month INT NOT NULL,
+			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
+			ma_vtyt_cu VARCHAR(255) NOT NULL,
+			ten_vtyt_bv VARCHAR(500) NOT NULL,
+			ma_hieu VARCHAR(255) NOT NULL DEFAULT '',
+			hang_sx VARCHAR(255) NOT NULL DEFAULT '',
+			nha_thau VARCHAR(500) NOT NULL DEFAULT '',
+			type_name VARCHAR(255) NOT NULL DEFAULT '',
+			quy_cach VARCHAR(500) NOT NULL DEFAULT '',
+			don_vi_tinh VARCHAR(100) NOT NULL DEFAULT '',
+			don_gia DECIMAL(18,2) NOT NULL DEFAULT 0,
+			sl_xuat INT NOT NULL DEFAULT 0,
+			sl_nhap INT NOT NULL DEFAULT 0,
+			sl_ton INT NOT NULL DEFAULT 0,
+			du_tru INT NOT NULL DEFAULT 0,
+			goi_hang INT NOT NULL DEFAULT 0,
+			thanh_tien BIGINT NOT NULL DEFAULT 0,
+			status VARCHAR(32) NOT NULL,
+			ly_do TEXT NULL,
+			nguoi_duyet_id BIGINT NULL,
+			nguoi_duyet VARCHAR(255) NOT NULL DEFAULT '',
+			nguoi_duyet_email VARCHAR(255) NOT NULL DEFAULT '',
+			ngay_duyet VARCHAR(64) NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			PRIMARY KEY (id),
+			UNIQUE KEY uk_forecast_monthly_snapshots_period_item (forecast_year, forecast_month, ma_vtyt_cu),
+			KEY idx_forecast_monthly_snapshots_period (forecast_year, forecast_month),
+			KEY idx_forecast_monthly_snapshots_status (status),
+			KEY idx_forecast_monthly_snapshots_source (source_approval_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+	`
+
+	if _, err := r.DB.Exec(snapshotStatement); err != nil {
+		return fmt.Errorf("error ensuring forecast monthly snapshot schema: %w", err)
+	}
+
+	if err := r.BackfillMonthlySnapshots(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *ForecastApprovalRepository) BackfillMonthlySnapshots() error {
+	_, err := r.DB.Exec(`
+		INSERT IGNORE INTO forecast_monthly_snapshots (
+			source_approval_id,
+			forecast_year,
+			forecast_month,
+			ma_quan_ly,
+			ma_vtyt_cu,
+			ten_vtyt_bv,
+			ma_hieu,
+			hang_sx,
+			nha_thau,
+			type_name,
+			quy_cach,
+			don_vi_tinh,
+			don_gia,
+			sl_xuat,
+			sl_nhap,
+			sl_ton,
+			du_tru,
+			goi_hang,
+			thanh_tien,
+			status,
+			ly_do,
+			nguoi_duyet_id,
+			nguoi_duyet,
+			nguoi_duyet_email,
+			ngay_duyet
+		)
+		SELECT
+			snapshot.source_approval_id,
+			snapshot.forecast_year,
+			snapshot.forecast_month,
+			snapshot.ma_quan_ly,
+			snapshot.ma_vtyt_cu,
+			snapshot.ten_vtyt_bv,
+			snapshot.ma_hieu,
+			snapshot.hang_sx,
+			snapshot.nha_thau,
+			snapshot.type_name,
+			snapshot.quy_cach,
+			snapshot.don_vi_tinh,
+			snapshot.don_gia,
+			snapshot.sl_xuat,
+			snapshot.sl_nhap,
+			snapshot.sl_ton,
+			snapshot.du_tru,
+			snapshot.du_tru,
+			CAST(ROUND(snapshot.du_tru * snapshot.don_gia) AS SIGNED),
+			snapshot.status,
+			snapshot.ly_do,
+			snapshot.nguoi_duyet_id,
+			snapshot.nguoi_duyet,
+			snapshot.nguoi_duyet_email,
+			snapshot.ngay_duyet
+		FROM (
+			SELECT
+				fa.id AS source_approval_id,
+				fa.forecast_year,
+				fa.forecast_month,
+				fa.ma_quan_ly,
+				fa.ma_vtyt_cu,
+				fa.ten_vtyt_bv,
+				COALESCE(s.MA_HIEU, '') AS ma_hieu,
+				COALESCE(s.HANGSX, '') AS hang_sx,
+				COALESCE(s.NHA_CUNG_CAP, '') AS nha_thau,
+				COALESCE(s.TYPENAME, '') AS type_name,
+				COALESCE(s.QUY_CACH_DONG_GOI, '') AS quy_cach,
+				COALESCE(s.UNIT, '') AS don_vi_tinh,
+				COALESCE(s.PRICE, 0) AS don_gia,
+				COALESCE(s.XUATTRONGKY, 0) AS sl_xuat,
+				COALESCE(s.NHAPTRONGKY, 0) AS sl_nhap,
+				COALESCE(s.TONDAUKY, 0) AS sl_ton,
+				COALESCE(
+					h.du_tru_sua,
+					h.du_tru_goc,
+					fa.du_tru_sua,
+					fa.du_tru_goc,
+					CASE
+						WHEN COALESCE(s.XUATTRONGKY, 0) - COALESCE(s.TONDAUKY, 0) <= 0 THEN COALESCE(s.XUATTRONGKY, 0)
+						ELSE COALESCE(s.XUATTRONGKY, 0) - COALESCE(s.TONDAUKY, 0)
+					END,
+					0
+				) AS du_tru,
+				fa.status,
+				fa.ly_do,
+				fa.nguoi_duyet_id,
+				fa.nguoi_duyet,
+				fa.nguoi_duyet_email,
+				fa.thoi_gian_duyet AS ngay_duyet
+			FROM forecast_approvals fa
+			LEFT JOIN forecast_change_history h ON h.id = (
+				SELECT MAX(h2.id)
+				FROM forecast_change_history h2
+				WHERE h2.forecast_year = fa.forecast_year
+					AND h2.forecast_month = fa.forecast_month
+					AND TRIM(COALESCE(h2.ma_vtyt_cu, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
+			)
+			LEFT JOIN supplies s ON s.IDX1 = (
+				SELECT MIN(s2.IDX1)
+				FROM supplies s2
+				WHERE TRIM(COALESCE(s2.ID, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
+			)
+		) snapshot
+	`)
+	if err != nil {
+		return fmt.Errorf("error backfilling forecast monthly snapshots: %w", err)
 	}
 
 	return nil
@@ -327,10 +484,152 @@ func (r *ForecastApprovalRepository) SaveApprovals(inputs []SaveForecastApproval
 				return fmt.Errorf("error saving forecast change history: %w", err)
 			}
 		}
+
+		if err := r.upsertMonthlySnapshot(tx, input); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("error committing forecast approvals: %w", err)
+	}
+
+	return nil
+}
+
+func (r *ForecastApprovalRepository) upsertMonthlySnapshot(tx *sql.Tx, input SaveForecastApprovalInput) error {
+	_, err := tx.Exec(`
+		INSERT INTO forecast_monthly_snapshots (
+			source_approval_id,
+			forecast_year,
+			forecast_month,
+			ma_quan_ly,
+			ma_vtyt_cu,
+			ten_vtyt_bv,
+			ma_hieu,
+			hang_sx,
+			nha_thau,
+			type_name,
+			quy_cach,
+			don_vi_tinh,
+			don_gia,
+			sl_xuat,
+			sl_nhap,
+			sl_ton,
+			du_tru,
+			goi_hang,
+			thanh_tien,
+			status,
+			ly_do,
+			nguoi_duyet_id,
+			nguoi_duyet,
+			nguoi_duyet_email,
+			ngay_duyet
+		)
+		SELECT
+			snapshot.source_approval_id,
+			snapshot.forecast_year,
+			snapshot.forecast_month,
+			snapshot.ma_quan_ly,
+			snapshot.ma_vtyt_cu,
+			snapshot.ten_vtyt_bv,
+			snapshot.ma_hieu,
+			snapshot.hang_sx,
+			snapshot.nha_thau,
+			snapshot.type_name,
+			snapshot.quy_cach,
+			snapshot.don_vi_tinh,
+			snapshot.don_gia,
+			snapshot.sl_xuat,
+			snapshot.sl_nhap,
+			snapshot.sl_ton,
+			snapshot.du_tru,
+			snapshot.du_tru,
+			CAST(ROUND(snapshot.du_tru * snapshot.don_gia) AS SIGNED),
+			snapshot.status,
+			snapshot.ly_do,
+			snapshot.nguoi_duyet_id,
+			snapshot.nguoi_duyet,
+			snapshot.nguoi_duyet_email,
+			snapshot.ngay_duyet
+		FROM (
+			SELECT
+				fa.id AS source_approval_id,
+				fa.forecast_year,
+				fa.forecast_month,
+				fa.ma_quan_ly,
+				fa.ma_vtyt_cu,
+				fa.ten_vtyt_bv,
+				COALESCE(s.MA_HIEU, '') AS ma_hieu,
+				COALESCE(s.HANGSX, '') AS hang_sx,
+				COALESCE(s.NHA_CUNG_CAP, '') AS nha_thau,
+				COALESCE(s.TYPENAME, '') AS type_name,
+				COALESCE(s.QUY_CACH_DONG_GOI, '') AS quy_cach,
+				COALESCE(s.UNIT, '') AS don_vi_tinh,
+				COALESCE(s.PRICE, 0) AS don_gia,
+				COALESCE(s.XUATTRONGKY, 0) AS sl_xuat,
+				COALESCE(s.NHAPTRONGKY, 0) AS sl_nhap,
+				COALESCE(s.TONDAUKY, 0) AS sl_ton,
+				COALESCE(
+					h.du_tru_sua,
+					h.du_tru_goc,
+					fa.du_tru_sua,
+					fa.du_tru_goc,
+					CASE
+						WHEN COALESCE(s.XUATTRONGKY, 0) - COALESCE(s.TONDAUKY, 0) <= 0 THEN COALESCE(s.XUATTRONGKY, 0)
+						ELSE COALESCE(s.XUATTRONGKY, 0) - COALESCE(s.TONDAUKY, 0)
+					END,
+					0
+				) AS du_tru,
+				fa.status,
+				fa.ly_do,
+				fa.nguoi_duyet_id,
+				fa.nguoi_duyet,
+				fa.nguoi_duyet_email,
+				fa.thoi_gian_duyet AS ngay_duyet
+			FROM forecast_approvals fa
+			LEFT JOIN forecast_change_history h ON h.id = (
+				SELECT MAX(h2.id)
+				FROM forecast_change_history h2
+				WHERE h2.forecast_year = fa.forecast_year
+					AND h2.forecast_month = fa.forecast_month
+					AND TRIM(COALESCE(h2.ma_vtyt_cu, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
+			)
+			LEFT JOIN supplies s ON s.IDX1 = (
+				SELECT MIN(s2.IDX1)
+				FROM supplies s2
+				WHERE TRIM(COALESCE(s2.ID, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
+			)
+			WHERE fa.forecast_month = ?
+				AND fa.forecast_year = ?
+				AND TRIM(COALESCE(fa.ma_vtyt_cu, '')) = TRIM(?)
+		) snapshot
+		ON DUPLICATE KEY UPDATE
+			source_approval_id = VALUES(source_approval_id),
+			ma_quan_ly = VALUES(ma_quan_ly),
+			ten_vtyt_bv = VALUES(ten_vtyt_bv),
+			ma_hieu = VALUES(ma_hieu),
+			hang_sx = VALUES(hang_sx),
+			nha_thau = VALUES(nha_thau),
+			type_name = VALUES(type_name),
+			quy_cach = VALUES(quy_cach),
+			don_vi_tinh = VALUES(don_vi_tinh),
+			don_gia = VALUES(don_gia),
+			sl_xuat = VALUES(sl_xuat),
+			sl_nhap = VALUES(sl_nhap),
+			sl_ton = VALUES(sl_ton),
+			du_tru = VALUES(du_tru),
+			goi_hang = VALUES(goi_hang),
+			thanh_tien = VALUES(thanh_tien),
+			status = VALUES(status),
+			ly_do = VALUES(ly_do),
+			nguoi_duyet_id = VALUES(nguoi_duyet_id),
+			nguoi_duyet = VALUES(nguoi_duyet),
+			nguoi_duyet_email = VALUES(nguoi_duyet_email),
+			ngay_duyet = VALUES(ngay_duyet)
+	`, input.ForecastMonth, input.ForecastYear, input.MaVtytCu)
+	if err != nil {
+		return fmt.Errorf("error upserting forecast monthly snapshot: %w", err)
 	}
 
 	return nil
@@ -559,42 +858,26 @@ func (r *ForecastApprovalRepository) listApprovalHistory(limit, month, year int)
 func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonthlyHistoryRecord, error) {
 	rows, err := r.DB.Query(`
 		SELECT
-			fa.id,
-			fa.forecast_month,
-			fa.forecast_year,
-			fa.ma_vtyt_cu,
-			fa.ten_vtyt_bv,
-			fa.status,
-			COALESCE(h.du_tru_goc, fa.du_tru_goc),
-			COALESCE(h.du_tru_sua, fa.du_tru_sua),
-			fa.nguoi_duyet,
-			fa.thoi_gian_duyet,
-			COALESCE(s.QUY_CACH_DONG_GOI, ''),
-			COALESCE(s.UNIT, ''),
-			COALESCE(s.TYPENAME, ''),
-			COALESCE(s.PRICE, 0)
-		FROM forecast_approvals fa
-		LEFT JOIN (
-			SELECT
-				h1.forecast_year,
-				h1.forecast_month,
-				h1.ma_vtyt_cu,
-				h1.du_tru_goc,
-				h1.du_tru_sua
-			FROM forecast_change_history h1
-			INNER JOIN (
-				SELECT MAX(id) AS latest_id
-				FROM forecast_change_history
-				GROUP BY forecast_year, forecast_month, ma_vtyt_cu
-			) latest ON latest.latest_id = h1.id
-		) h ON h.forecast_year = fa.forecast_year
-			AND h.forecast_month = fa.forecast_month
-			AND TRIM(COALESCE(h.ma_vtyt_cu, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
-		LEFT JOIN supplies s ON TRIM(COALESCE(s.ID, '')) = TRIM(fa.ma_vtyt_cu)
-		ORDER BY fa.forecast_year DESC, fa.forecast_month DESC, fa.updated_at DESC, fa.id DESC
+			id,
+			forecast_month,
+			forecast_year,
+			ma_vtyt_cu,
+			ten_vtyt_bv,
+			status,
+			du_tru,
+			goi_hang,
+			nguoi_duyet,
+			ngay_duyet,
+			quy_cach,
+			don_vi_tinh,
+			type_name,
+			don_gia,
+			thanh_tien
+		FROM forecast_monthly_snapshots
+		ORDER BY forecast_year DESC, forecast_month DESC, updated_at DESC, id DESC
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("error listing monthly forecast change history: %w", err)
+		return nil, fmt.Errorf("error listing forecast monthly snapshots: %w", err)
 	}
 	defer rows.Close()
 
@@ -615,14 +898,15 @@ func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonth
 			maVtyt     string
 			tenVtyt    string
 			status     string
-			duTruGoc   sql.NullInt64
-			duTruSua   sql.NullInt64
+			duTru      int
+			goiHang    int
 			nguoiDuyet string
 			ngayDuyet  string
 			quyCach    string
 			donViTinh  string
 			typeName   string
 			donGia     float64
+			thanhTien  int64
 		)
 
 		if err := rows.Scan(
@@ -632,16 +916,17 @@ func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonth
 			&maVtyt,
 			&tenVtyt,
 			&status,
-			&duTruGoc,
-			&duTruSua,
+			&duTru,
+			&goiHang,
 			&nguoiDuyet,
 			&ngayDuyet,
 			&quyCach,
 			&donViTinh,
 			&typeName,
 			&donGia,
+			&thanhTien,
 		); err != nil {
-			return nil, fmt.Errorf("error scanning monthly forecast change history row: %w", err)
+			return nil, fmt.Errorf("error scanning forecast monthly snapshot row: %w", err)
 		}
 
 		key := fmt.Sprintf("forecast-%d-%02d", year, month)
@@ -665,16 +950,7 @@ func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonth
 			buckets[key] = bucket
 		}
 
-		duTru := 0
-		if duTruSua.Valid {
-			duTru = int(duTruSua.Int64)
-		} else if duTruGoc.Valid {
-			duTru = int(duTruGoc.Int64)
-		}
-
-		goiHang := duTru
-		unitPrice := int64(math.Round(donGia))
-		thanhTien := int64(goiHang) * unitPrice
+		unitPrice := int64(donGia)
 
 		bucket.record.DanhSachVatTu = append(bucket.record.DanhSachVatTu, ForecastMonthlyHistoryItem{
 			STT:        itemID,
