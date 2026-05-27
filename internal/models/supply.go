@@ -134,6 +134,30 @@ type SupplyRepository struct {
 	DB *sql.DB
 }
 
+type SupplyUpsertInput struct {
+	IDX1             int
+	ProductID        int
+	GroupName        string
+	ID               string
+	IDX2             string
+	MaHieu           string
+	TypeName         string
+	Name             string
+	Unit             string
+	QuyCachDongGoi   string
+	QuyCachGiaoHang  string
+	ThongTinThau     string
+	TongThau         string
+	HangSX           string
+	NuocSX           string
+	NhaCungCap       string
+	Price            float64
+	TonDauKy         int
+	NhapTrongKy      int
+	XuatTrongKy      int
+	TongNhap         int
+}
+
 // NewSupplyRepository creates a new supply repository
 func NewSupplyRepository(db *sql.DB) *SupplyRepository {
 	return &SupplyRepository{DB: db}
@@ -640,4 +664,77 @@ func (r *SupplyRepository) GetForecastCatalog(keyword string) ([]Supply, error) 
 	}
 
 	return supplies, nil
+}
+
+func (r *SupplyRepository) ReplaceAll(inputs []SupplyUpsertInput) error {
+	tx, err := r.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("error starting supply refresh transaction: %w", err)
+	}
+
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = tx.Exec("DELETE FROM supplies"); err != nil {
+		return fmt.Errorf("error clearing supplies: %w", err)
+	}
+
+	if len(inputs) == 0 {
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("error committing empty supply refresh: %w", err)
+		}
+		return nil
+	}
+
+	insertSQL := `
+		INSERT INTO supplies (
+			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT,
+			QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, THONG_TIN_THAU, TONGTHAU,
+			HANGSX, NUOC_SX, NHA_CUNG_CAP, PRICE, TONDAUKY, NHAPTRONGKY,
+			XUATTRONGKY, TONGNHAP
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	stmt, err := tx.Prepare(insertSQL)
+	if err != nil {
+		return fmt.Errorf("error preparing supply refresh insert: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, input := range inputs {
+		if _, err = stmt.Exec(
+			input.IDX1,
+			input.ProductID,
+			input.GroupName,
+			input.ID,
+			input.IDX2,
+			input.MaHieu,
+			input.TypeName,
+			input.Name,
+			input.Unit,
+			input.QuyCachDongGoi,
+			input.QuyCachGiaoHang,
+			input.ThongTinThau,
+			input.TongThau,
+			input.HangSX,
+			input.NuocSX,
+			input.NhaCungCap,
+			input.Price,
+			input.TonDauKy,
+			input.NhapTrongKy,
+			input.XuatTrongKy,
+			input.TongNhap,
+		); err != nil {
+			return fmt.Errorf("error inserting refreshed supply %q: %w", input.ID, err)
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("error committing supply refresh: %w", err)
+	}
+
+	return nil
 }

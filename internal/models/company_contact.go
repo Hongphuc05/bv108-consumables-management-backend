@@ -485,3 +485,55 @@ func (r *CompanyContactRepository) Search(keyword string, limit int) ([]CompanyC
 
 	return contacts, nil
 }
+
+func (r *CompanyContactRepository) GetByID(id int64) (*CompanyContact, error) {
+	if id <= 0 {
+		return nil, nil
+	}
+
+	var contact CompanyContact
+	if err := r.DB.QueryRow(`
+		SELECT id, identity_key, company_name, tax_id, email
+		FROM company_contacts
+		WHERE id = ?
+		LIMIT 1
+	`, id).Scan(&contact.ID, &contact.IdentityKey, &contact.CompanyName, &contact.TaxID, &contact.Email); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("error loading company contact by id: %w", err)
+	}
+
+	if contact.Email == "" {
+		contact.Email = DefaultCompanyContactEmail
+	}
+
+	return &contact, nil
+}
+
+func (r *CompanyContactRepository) GetByCompanyName(companyName string) (*CompanyContact, error) {
+	normalizedName := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(companyName)), " "))
+	if normalizedName == "" {
+		return nil, nil
+	}
+
+	var contact CompanyContact
+	if err := r.DB.QueryRow(`
+		SELECT id, identity_key, company_name, tax_id, email
+		FROM company_contacts
+		WHERE LOWER(TRIM(company_name)) = ?
+		ORDER BY id DESC
+		LIMIT 1
+	`, normalizedName).Scan(&contact.ID, &contact.IdentityKey, &contact.CompanyName, &contact.TaxID, &contact.Email); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("error loading company contact by name: %w", err)
+	}
+
+	if contact.Email == "" {
+		contact.Email = DefaultCompanyContactEmail
+	}
+
+	return &contact, nil
+}

@@ -768,8 +768,8 @@ func (h *OrderHandler) sendPlacedOrderEmails(orders []models.PendingOrder) error
 
 	groups := make(map[string]emailGroup)
 	for _, order := range orders {
-		email := strings.TrimSpace(order.Email)
 		supplierName := strings.TrimSpace(order.NhaThau)
+		email := h.resolveOrderRecipientEmail(order)
 		if email == "" {
 			if supplierName == "" {
 				return fmt.Errorf("missing company email")
@@ -804,6 +804,10 @@ func (h *OrderHandler) sendPlacedOrderEmails(orders []models.PendingOrder) error
 	}
 
 	return nil
+}
+
+func (h *OrderHandler) resolveOrderRecipientEmail(order models.PendingOrder) string {
+	return strings.TrimSpace(order.Email)
 }
 
 func (h *OrderHandler) getCurrentUser(c *gin.Context) (*models.UserProfile, error) {

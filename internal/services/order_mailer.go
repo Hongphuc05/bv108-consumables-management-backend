@@ -20,12 +20,12 @@ type OrderEmailSender interface {
 }
 
 type OrderEmailItem struct {
-	Index         int
-	TenVatTu      string
-	MaVatTu       string
-	DonViTinh     string
-	SoLuong       int
-	DotGiaoHang   string
+	Index       int
+	TenVatTu    string
+	MaVatTu     string
+	DonViTinh   string
+	SoLuong     int
+	DotGiaoHang string
 }
 
 type SMTPOrderMailer struct {
@@ -47,18 +47,18 @@ func NewSMTPOrderMailer(host, port, username, appPassword, from string) *SMTPOrd
 }
 
 const (
-	placedOrderEmailSubject    = "ĐƠN ĐẶT HÀNG VẬT TƯ TẠI BỆNH VIỆN QUÂN ĐỘI TW 108"
-	placedOrderEmailBody       = "Khoa trang bị bênh viên quân đội TW 108 đặt hàng quý công ty theo nội dung đính kèm sau:\npdf đính kèm"
-	placedOrderAttachmentName  = "don-dat-hang-vat-tu-bv108.pdf"
-	placedOrderPDFContentType  = gomail.ContentType("application/pdf")
-	orderPDFFontFamily         = "orderpdf"
-	orderPDFFontRegularEnv     = "ORDER_PDF_FONT_REGULAR"
-	orderPDFFontBoldEnv        = "ORDER_PDF_FONT_BOLD"
-	orderPDFBodyFontSize       = 13.0
-	orderPDFTableFontSize      = 11.0
-	orderPDFBodyLineHeight     = 6.0
-	orderPDFParagraphSpacing   = 4.0
-	orderPDFSectionSpacing     = 6.0
+	placedOrderEmailSubject   = "ĐƠN ĐẶT HÀNG VẬT TƯ TẠI BỆNH VIỆN QUÂN ĐỘI TW 108"
+	placedOrderEmailBody      = "Khoa trang bị bênh viên quân đội TW 108 đặt hàng quý công ty theo nội dung đính kèm sau:\npdf đính kèm"
+	placedOrderAttachmentName = "don-dat-hang-vat-tu-bv108.pdf"
+	placedOrderPDFContentType = gomail.ContentType("application/pdf")
+	orderPDFFontFamily        = "orderpdf"
+	orderPDFFontRegularEnv    = "ORDER_PDF_FONT_REGULAR"
+	orderPDFFontBoldEnv       = "ORDER_PDF_FONT_BOLD"
+	orderPDFBodyFontSize      = 13.0
+	orderPDFTableFontSize     = 11.0
+	orderPDFBodyLineHeight    = 6.0
+	orderPDFParagraphSpacing  = 4.0
+	orderPDFSectionSpacing    = 6.0
 )
 
 func (m *SMTPOrderMailer) SendPlacedOrderEmail(recipientEmail, supplierName string, items []OrderEmailItem) error {
@@ -121,12 +121,12 @@ func (m *SMTPOrderMailer) SendPlacedOrderEmail(recipientEmail, supplierName stri
 	message.Subject(placedOrderEmailSubject)
 
 	document := placedOrderDocumentData{
-		CompanyName:   supplierName,
-		CurrentMonth:  currentOrderMonth(),
-		CurrentDate:   currentOrderDate(),
-		ContactName:   "Nguyễn Thành Trung",
-		ContactDept:   "Khoa Trang bị",
-		Items:         items,
+		CompanyName:  supplierName,
+		CurrentMonth: currentOrderMonth(),
+		CurrentDate:  currentOrderDate(),
+		ContactName:  "Nguyễn Thành Trung",
+		ContactDept:  "Khoa Trang bị",
+		Items:        items,
 	}
 
 	pdfBytes, err := renderPlacedOrderAttachmentPDF(document)
@@ -250,7 +250,7 @@ func renderPlacedOrderPDFTable(pdf *gofpdf.Fpdf, items []OrderEmailItem) {
 	leftMargin, _, _, _ := pdf.GetMargins()
 	_, pageHeight := pdf.GetPageSize()
 	bottomMargin := 15.0
-	tableWidths := []float64{12, 62, 28, 24, 20, 34}
+	tableWidths := []float64{12, 78, 28, 26, 36}
 	lineHeight := 5.5
 	cellPadding := 1.2
 
@@ -259,7 +259,7 @@ func renderPlacedOrderPDFTable(pdf *gofpdf.Fpdf, items []OrderEmailItem) {
 	pdf.Ln(orderPDFParagraphSpacing - 1)
 
 	drawTableHeader := func() {
-		drawValues := []string{"STT", "Tên vật tư", "Mã vật tư", "Đơn vị tính", "Số lượng", "Đợt giao hàng"}
+		drawValues := []string{"STT", "Tên vật tư", "Mã vật tư", "Đơn vị tính", "Số lượng"}
 		pdf.SetFont(orderPDFFontFamily, "B", orderPDFTableFontSize)
 		x := leftMargin
 		y := pdf.GetY()
@@ -302,7 +302,7 @@ func renderPlacedOrderPDFTable(pdf *gofpdf.Fpdf, items []OrderEmailItem) {
 
 		x := leftMargin
 		y := pdf.GetY()
-		alignments := []string{"C", "C", "C", "C", "C", "C"}
+		alignments := []string{"C", "C", "C", "C", "C"}
 
 		for index, value := range values {
 			width := tableWidths[index]
@@ -325,12 +325,11 @@ func renderPlacedOrderPDFTable(pdf *gofpdf.Fpdf, items []OrderEmailItem) {
 			nonEmptyPDFText(item.MaVatTu),
 			nonEmptyPDFText(item.DonViTinh),
 			strconv.Itoa(item.SoLuong),
-			nonEmptyPDFText(item.DotGiaoHang),
 		}, false)
 	}
 
 	if len(items) == 0 {
-		drawRow([]string{"1", "...", "...", "...", "...", "..."}, false)
+		drawRow([]string{"1", "...", "...", "...", "..."}, false)
 	}
 
 	pdf.Ln(orderPDFSectionSpacing - 1)

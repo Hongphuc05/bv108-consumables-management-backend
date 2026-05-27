@@ -1,0 +1,283 @@
+package services
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"bv108-consumables-management-backend/config"
+	"bv108-consumables-management-backend/internal/models"
+)
+
+type internalSupplySyncRepository interface {
+	ReplaceAll(inputs []models.SupplyUpsertInput) error
+}
+
+type InternalSupplySyncService struct {
+	config     *config.Config
+	repo       internalSupplySyncRepository
+	httpClient *http.Client
+	location   *time.Location
+	mu         sync.Mutex
+}
+
+type internalSupplyAPIRow struct {
+	Idx1            int     `json:"IDX1"`
+	ProductID       int     `json:"PRODUCTID"`
+	GroupName       string  `json:"GROUPNAME"`
+	MaVtyt          string  `json:"MA_VTYT"`
+	ID              string  `json:"ID"`
+	Idx2            string  `json:"IDX2"`
+	MaHieu          string  `json:"MA_HIEU"`
+	TypeName        string  `json:"TYPENAME"`
+	TenVatTuBV      string  `json:"TEN_VTYT_BV"`
+	Name            string  `json:"NAME"`
+	DonViTinh       string  `json:"DON_VI_TINH"`
+	Unit            string  `json:"UNIT"`
+	QuyCach         string  `json:"QUY_CACH"`
+	QuyCachDongGoi  string  `json:"QUY_CACH_DONG_GOI"`
+	QuyCachGiaoHang string  `json:"QUY_CACH_GIAO_HANG"`
+	QuyetDinh       string  `json:"QUYET_DINH"`
+	ThongTinThau    string  `json:"THONG_TIN_THAU"`
+	TongThau        string  `json:"TONGTHAU"`
+	HangSX          string  `json:"HANG_SX"`
+	HangSXAlt       string  `json:"HANGSX"`
+	NuocSX          string  `json:"NUOC_SX"`
+	NuocSXAlt       string  `json:"NUOCSX"`
+	NhaThau         string  `json:"NHA_THAU"`
+	NhaCungCap      string  `json:"NHA_CUNG_CAP"`
+	DonGia          float64 `json:"DON_GIA"`
+	Price           float64 `json:"PRICE"`
+	SoLuongTonKho   int     `json:"SO_LUONG_TON_KHO"`
+	SlTon           int     `json:"SL_TON"`
+	TonDauKy        int     `json:"TONDAUKY"`
+	SlNhap          int     `json:"SL_NHAP"`
+	NhapTrongKy     int     `json:"NHAPTRONGKY"`
+	SlXuat          int     `json:"SL_XUAT"`
+	XuatTrongKy     int     `json:"XUATTRONGKY"`
+	TongNhap        int     `json:"TONGNHAP"`
+}
+
+type internalSupplyAPIResponse struct {
+	Data []internalSupplyAPIRow `json:"data"`
+	Rows []internalSupplyAPIRow `json:"rows"`
+	Items []internalSupplyAPIRow `json:"items"`
+}
+
+func NewInternalSupplySyncService(cfg *config.Config, repo internalSupplySyncRepository) *InternalSupplySyncService {
+	location, err := time.LoadLocation(strings.TrimSpace(cfg.InternalSupplySyncTimezone))
+	if err != nil {
+		log.Printf("[internal-supply-sync] invalid timezone %q, fallback to local: %v", cfg.InternalSupplySyncTimezone, err)
+		location = time.Local
+	}
+
+	timeout := time.Duration(cfg.InternalSupplyAPITimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+
+	return &InternalSupplySyncService{
+		config: cfg,
+		repo:   repo,
+		httpClient: &http.Client{
+			Timeout: timeout,
+		},
+		location: location,
+	}
+}
+
+func (s *InternalSupplySyncService) Start(ctx context.Context) {
+	if !s.config.InternalSupplySyncEnabled {
+		log.Println("[internal-supply-sync] disabled by INTERNAL_SUPPLY_SYNC_ENABLED")
+		return
+	}
+	if strings.TrimSpace(s.config.InternalSupplyAPIURL) == "" {
+		log.Println("[internal-supply-sync] skipped because INTERNAL_SUPPLY_API_URL is empty")
+		return
+	}
+
+	go s.runScheduler(ctx)
+}
+
+func (s *InternalSupplySyncService) RunOnce(ctx context.Context) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.fetchRows(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if len(rows) == 0 {
+		return 0, fmt.Errorf("internal supply API returned no rows")
+	}
+
+	inputs := make([]models.SupplyUpsertInput, 0, len(rows))
+	for index, row := range rows {
+		inputs = append(inputs, mapInternalSupplyRow(row, index))
+	}
+
+	if err := s.repo.ReplaceAll(inputs); err != nil {
+		return 0, err
+	}
+
+	log.Printf("[internal-supply-sync] synced %d supply rows", len(inputs))
+	return len(inputs), nil
+}
+
+func (s *InternalSupplySyncService) runScheduler(ctx context.Context) {
+	if s.config.InternalSupplySyncRunOnStartup {
+		if _, err := s.RunOnce(ctx); err != nil {
+			log.Printf("[internal-supply-sync] startup sync failed: %v", err)
+		}
+	}
+
+	for {
+		waitDuration := s.durationUntilNextRun(time.Now())
+		timer := time.NewTimer(waitDuration)
+
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+			if _, err := s.RunOnce(ctx); err != nil {
+				log.Printf("[internal-supply-sync] scheduled sync failed: %v", err)
+			}
+		}
+	}
+}
+
+func (s *InternalSupplySyncService) durationUntilNextRun(now time.Time) time.Duration {
+	current := now.In(s.location)
+	nextRun := time.Date(
+		current.Year(),
+		current.Month(),
+		current.Day(),
+		s.config.InternalSupplySyncHour,
+		s.config.InternalSupplySyncMinute,
+		0,
+		0,
+		s.location,
+	)
+
+	if !nextRun.After(current) {
+		nextRun = nextRun.Add(24 * time.Hour)
+	}
+
+	return nextRun.Sub(current)
+}
+
+func (s *InternalSupplySyncService) fetchRows(ctx context.Context) ([]internalSupplyAPIRow, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.config.InternalSupplyAPIURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating internal supply API request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+
+	if token := strings.TrimSpace(s.config.InternalSupplyAPIToken); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error calling internal supply API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("internal supply API returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading internal supply API response: %w", err)
+	}
+
+	var listPayload []internalSupplyAPIRow
+	if err := json.Unmarshal(body, &listPayload); err == nil && len(listPayload) > 0 {
+		return listPayload, nil
+	}
+
+	var objectPayload internalSupplyAPIResponse
+	if err := json.Unmarshal(body, &objectPayload); err != nil {
+		return nil, fmt.Errorf("error decoding internal supply API response: %w", err)
+	}
+
+	switch {
+	case len(objectPayload.Data) > 0:
+		return objectPayload.Data, nil
+	case len(objectPayload.Rows) > 0:
+		return objectPayload.Rows, nil
+	case len(objectPayload.Items) > 0:
+		return objectPayload.Items, nil
+	default:
+		return nil, nil
+	}
+}
+
+func mapInternalSupplyRow(row internalSupplyAPIRow, index int) models.SupplyUpsertInput {
+	id := firstNonEmpty(row.ID, row.MaVtyt)
+	name := firstNonEmpty(row.Name, row.TenVatTuBV)
+	unit := firstNonEmpty(row.Unit, row.DonViTinh)
+	quyCachDongGoi := firstNonEmpty(row.QuyCachDongGoi, row.QuyCach)
+	thongTinThau := firstNonEmpty(row.ThongTinThau, row.QuyetDinh)
+	hangSX := firstNonEmpty(row.HangSXAlt, row.HangSX)
+	nuocSX := firstNonEmpty(row.NuocSXAlt, row.NuocSX)
+	nhaCungCap := firstNonEmpty(row.NhaCungCap, row.NhaThau)
+	price := row.Price
+	if price == 0 {
+		price = row.DonGia
+	}
+	tonDauKy := firstNonZero(row.TonDauKy, row.SoLuongTonKho, row.SlTon)
+	nhapTrongKy := firstNonZero(row.NhapTrongKy, row.SlNhap)
+	xuatTrongKy := firstNonZero(row.XuatTrongKy, row.SlXuat)
+
+	return models.SupplyUpsertInput{
+		IDX1:            firstNonZero(row.Idx1, index+1),
+		ProductID:       row.ProductID,
+		GroupName:       strings.TrimSpace(row.GroupName),
+		ID:              strings.TrimSpace(id),
+		IDX2:            strings.TrimSpace(row.Idx2),
+		MaHieu:          strings.TrimSpace(row.MaHieu),
+		TypeName:        strings.TrimSpace(row.TypeName),
+		Name:            strings.TrimSpace(name),
+		Unit:            strings.TrimSpace(unit),
+		QuyCachDongGoi:  strings.TrimSpace(quyCachDongGoi),
+		QuyCachGiaoHang: strings.TrimSpace(row.QuyCachGiaoHang),
+		ThongTinThau:    strings.TrimSpace(thongTinThau),
+		TongThau:        strings.TrimSpace(row.TongThau),
+		HangSX:          strings.TrimSpace(hangSX),
+		NuocSX:          strings.TrimSpace(nuocSX),
+		NhaCungCap:      strings.TrimSpace(nhaCungCap),
+		Price:           price,
+		TonDauKy:        tonDauKy,
+		NhapTrongKy:     nhapTrongKy,
+		XuatTrongKy:     xuatTrongKy,
+		TongNhap:        firstNonZero(row.TongNhap, nhapTrongKy),
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func firstNonZero(values ...int) int {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}

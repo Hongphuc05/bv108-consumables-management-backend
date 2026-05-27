@@ -929,11 +929,11 @@ func (r *OrderRepository) insertPendingOrderTx(tx *sql.Tx, input CreatePendingOr
 	approverID := nullableInt64(input.Approver)
 	approverName := nullableActorField(input.Approver, func(actor *OrderActor) string { return actor.Username })
 	approverEmail := nullableActorField(input.Approver, func(actor *OrderActor) string { return actor.Email })
-	contactRepo := NewCompanyContactRepository(r.DB)
-	companyContactID, resolvedEmail, err := contactRepo.EnsureContactTx(tx, input.NhaThau, "", input.Email)
-	if err != nil {
-		return fmt.Errorf("error resolving company contact for pending order: %w", err)
+	resolvedEmail := strings.TrimSpace(input.Email)
+	if resolvedEmail == "" {
+		return fmt.Errorf("missing company email")
 	}
+	var companyContactID sql.NullInt64
 
 	if _, err := tx.Exec(`
 		INSERT INTO pending_orders (

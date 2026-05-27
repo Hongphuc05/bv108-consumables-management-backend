@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"os/signal"
@@ -141,6 +142,12 @@ func main() {
 	hoaDonHandler := handlers.NewHoaDonHandler(hoaDonRepo)
 	refreshHandler := handlers.NewRefreshHandler(hoaDonRepo, realtimeHub)
 
+	internalSupplySyncService := services.NewInternalSupplySyncService(config.AppConfig, supplyRepo)
+	internalSupplySyncHandler := handlers.NewInternalSupplySyncHandler(internalSupplySyncService)
+	backgroundCtx, cancelBackground := context.WithCancel(context.Background())
+	defer cancelBackground()
+	internalSupplySyncService.Start(backgroundCtx)
+
 	// Initialize Gin router
 	router := gin.Default()
 
@@ -180,6 +187,7 @@ func main() {
 			supplies.GET("/compare-level2", supplyHandler.GetCompareLevel2Options) // GET /api/supplies/compare-level2?level1=xxx
 			supplies.GET("/compare-catalog", supplyHandler.GetCompareCatalog)      // GET /api/supplies/compare-catalog?page=1&pageSize=20&keyword=xxx&level1Filter=xxx&level2Filter=yyy
 			supplies.GET("/forecast-catalog", supplyHandler.GetForecastCatalog)
+			supplies.POST("/internal-sync", internalSupplySyncHandler.SyncNow)
 			supplies.POST("/compare", supplyHandler.CompareSupplies) // POST /api/supplies/compare
 			supplies.GET("/:id", supplyHandler.GetSupplyByID)        // GET /api/supplies/:id
 		}
@@ -237,4 +245,5 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down server...")
+	cancelBackground()
 }

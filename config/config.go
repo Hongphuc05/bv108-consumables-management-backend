@@ -11,22 +11,30 @@ import (
 )
 
 type Config struct {
-	DBHost          string
-	DBPort          string
-	DBUser          string
-	DBPassword      string
-	DBName          string
-	DBTLS           string
-	SMTPHost        string
-	SMTPPort        string
-	SMTPUsername    string
-	SMTPAppPassword string
-	SMTPFrom        string
-	ServerPort      string
-	GinMode         string
-	FrontendURL     string
-	JWTSecret       string
-	JWTExpiresHours int
+	DBHost                          string
+	DBPort                          string
+	DBUser                          string
+	DBPassword                      string
+	DBName                          string
+	DBTLS                           string
+	SMTPHost                        string
+	SMTPPort                        string
+	SMTPUsername                    string
+	SMTPAppPassword                 string
+	SMTPFrom                        string
+	ServerPort                      string
+	GinMode                         string
+	FrontendURL                     string
+	JWTSecret                       string
+	JWTExpiresHours                 int
+	InternalSupplyAPIURL            string
+	InternalSupplyAPIToken          string
+	InternalSupplyAPITimeoutSeconds int
+	InternalSupplySyncEnabled       bool
+	InternalSupplySyncHour          int
+	InternalSupplySyncMinute        int
+	InternalSupplySyncTimezone      string
+	InternalSupplySyncRunOnStartup  bool
 }
 
 var AppConfig *Config
@@ -41,22 +49,30 @@ func LoadConfig() error {
 	serverPort := getEnv("PORT", getEnv("SERVER_PORT", "8080"))
 
 	AppConfig = &Config{
-		DBHost:          getEnv("DB_HOST", "localhost"),
-		DBPort:          getEnv("DB_PORT", "3306"),
-		DBUser:          getEnv("DB_USER", "root"),
-		DBPassword:      getEnv("DB_PASSWORD", ""),
-		DBName:          getEnv("DB_NAME", "hospital_db"),
-		DBTLS:           getEnv("DB_TLS", ""),
-		SMTPHost:        getEnv("SMTP_HOST", "smtp.gmail.com"),
-		SMTPPort:        getEnv("SMTP_PORT", "587"),
-		SMTPUsername:    getEnv("SMTP_USERNAME", "kaelbridmon1990@gmail.com"),
-		SMTPAppPassword: getEnv("SMTP_APP_PASSWORD", ""),
-		SMTPFrom:        getEnv("SMTP_FROM", "kaelbridmon1990@gmail.com"),
-		ServerPort:      serverPort,
-		GinMode:         getEnv("GIN_MODE", "debug"),
-		FrontendURL:     getEnv("FRONTEND_URL", "http://localhost:5173"),
-		JWTSecret:       getEnv("JWT_SECRET", ""),
-		JWTExpiresHours: getEnvAsInt("JWT_EXPIRES_HOURS", 8),
+		DBHost:                          getEnv("DB_HOST", "localhost"),
+		DBPort:                          getEnv("DB_PORT", "3306"),
+		DBUser:                          getEnv("DB_USER", "root"),
+		DBPassword:                      getEnv("DB_PASSWORD", ""),
+		DBName:                          getEnv("DB_NAME", "hospital_db"),
+		DBTLS:                           getEnv("DB_TLS", ""),
+		SMTPHost:                        getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPPort:                        getEnv("SMTP_PORT", "587"),
+		SMTPUsername:                    getEnv("SMTP_USERNAME", ""),
+		SMTPAppPassword:                 getEnv("SMTP_APP_PASSWORD", ""),
+		SMTPFrom:                        getEnv("SMTP_FROM", getEnv("SMTP_USERNAME", "")),
+		ServerPort:                      serverPort,
+		GinMode:                         getEnv("GIN_MODE", "debug"),
+		FrontendURL:                     getEnv("FRONTEND_URL", "http://localhost:5173"),
+		JWTSecret:                       getEnv("JWT_SECRET", ""),
+		JWTExpiresHours:                 getEnvAsInt("JWT_EXPIRES_HOURS", 8),
+		InternalSupplyAPIURL:            getEnv("INTERNAL_SUPPLY_API_URL", ""),
+		InternalSupplyAPIToken:          getEnv("INTERNAL_SUPPLY_API_TOKEN", ""),
+		InternalSupplyAPITimeoutSeconds: getEnvAsInt("INTERNAL_SUPPLY_API_TIMEOUT_SECONDS", 120),
+		InternalSupplySyncEnabled:       getEnvAsBool("INTERNAL_SUPPLY_SYNC_ENABLED", false),
+		InternalSupplySyncHour:          getEnvAsInt("INTERNAL_SUPPLY_SYNC_HOUR", 20),
+		InternalSupplySyncMinute:        getEnvAsInt("INTERNAL_SUPPLY_SYNC_MINUTE", 0),
+		InternalSupplySyncTimezone:      getEnv("INTERNAL_SUPPLY_SYNC_TIMEZONE", "Asia/Bangkok"),
+		InternalSupplySyncRunOnStartup:  getEnvAsBool("INTERNAL_SUPPLY_SYNC_RUN_ON_STARTUP", false),
 	}
 
 	return nil
@@ -103,4 +119,20 @@ func getEnvAsInt(key string, defaultValue int) int {
 	}
 
 	return parsedValue
+}
+
+func getEnvAsBool(key string, defaultValue bool) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if value == "" {
+		return defaultValue
+	}
+
+	switch value {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return defaultValue
+	}
 }
