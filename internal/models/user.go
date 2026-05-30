@@ -153,3 +153,112 @@ func (r *UserRepository) UpdateProfile(userID int64, username, email string) (*U
 
 	return r.GetByID(userID)
 }
+
+func (r *UserRepository) ListOperationalUsers() ([]UserProfile, error) {
+	query := `
+		SELECT id, username, email, role
+		FROM users
+		WHERE is_active = 1
+		  AND LOWER(TRIM(role)) NOT IN ('admin', 'chi_huy_khoa', 'truong_khoa')
+		ORDER BY role, username, id
+	`
+
+	rows, err := r.DB.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("error listing operational users: %w", err)
+	}
+	defer rows.Close()
+
+	profiles := make([]UserProfile, 0)
+	for rows.Next() {
+		var profile UserProfile
+		if err := rows.Scan(&profile.ID, &profile.Username, &profile.Email, &profile.Role); err != nil {
+			return nil, fmt.Errorf("error scanning operational user: %w", err)
+		}
+		profiles = append(profiles, profile)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating operational users: %w", err)
+	}
+
+	return profiles, nil
+}
+
+func (r *UserRepository) ListActiveUsers() ([]UserProfile, error) {
+	query := `
+		SELECT id, username, email, role
+		FROM users
+		WHERE is_active = 1
+		ORDER BY username, id
+	`
+
+	rows, err := r.DB.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("error listing users: %w", err)
+	}
+	defer rows.Close()
+
+	profiles := make([]UserProfile, 0)
+	for rows.Next() {
+		var profile UserProfile
+		if err := rows.Scan(&profile.ID, &profile.Username, &profile.Email, &profile.Role); err != nil {
+			return nil, fmt.Errorf("error scanning user: %w", err)
+		}
+		profiles = append(profiles, profile)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating users: %w", err)
+	}
+
+	return profiles, nil
+}
+
+func (r *UserRepository) UpdateRole(userID int64, role string) (*User, error) {
+	query := `
+		UPDATE users
+		SET role = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND is_active = 1
+	`
+
+	result, err := r.DB.Exec(query, role, userID)
+	if err != nil {
+		return nil, fmt.Errorf("error updating user role: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("error getting affected rows: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	return r.GetByID(userID)
+}
+
+func (r *UserRepository) DeactivateByID(userID int64) error {
+	query := `
+		UPDATE users
+		SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND is_active = 1
+	`
+
+	result, err := r.DB.Exec(query, userID)
+	if err != nil {
+		return fmt.Errorf("error deactivating user: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("error getting affected rows: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("user not found")
+	}
+
+	return nil
+}

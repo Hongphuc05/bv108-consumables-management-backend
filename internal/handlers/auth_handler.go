@@ -63,6 +63,10 @@ type UpdateProfileRequest struct {
 	Email    string `json:"email" binding:"required"`
 }
 
+type UpdateManagedUserRoleRequest struct {
+	Role string `json:"role" binding:"required"`
+}
+
 type statusError struct {
 	status  int
 	message string
@@ -280,6 +284,127 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 	})
 }
 
+func (h *AuthHandler) ListManagedUsers(c *gin.Context) {
+	currentUser, err := getCurrentUserFromAuthorizationHeader(c, h.userRepo, h.jwtSecret)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !userHasAnyRole(currentUser, RoleAdmin, RoleChiHuyKhoa) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only admin and chi_huy_khoa can manage accounts"})
+		return
+	}
+
+	users, err := h.userRepo.ListActiveUsers()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"users": users,
+	})
+}
+
+func (h *AuthHandler) UpdateManagedUserRole(c *gin.Context) {
+	currentUser, err := getCurrentUserFromAuthorizationHeader(c, h.userRepo, h.jwtSecret)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !userHasAnyRole(currentUser, RoleAdmin, RoleChiHuyKhoa) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only admin and chi_huy_khoa can manage accounts"})
+		return
+	}
+
+	userID, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || userID <= 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_USER_ID", Message: "User ID is invalid"})
+		return
+	}
+
+	if userID == currentUser.ID {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_OPERATION", Message: "Cannot change your own role"})
+		return
+	}
+
+	var req UpdateManagedUserRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "Invalid update role payload"})
+		return
+	}
+
+	req.Role = strings.ToLower(strings.TrimSpace(req.Role))
+	if req.Role == RoleTruongKhoa {
+		req.Role = RoleAdmin
+	}
+
+	if !isAssignableRole(req.Role) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_ROLE", Message: "Role must be one of: admin, chi_huy_khoa, nhan_vien_kho, thu_kho, nhan_vien_ke_toan, nhan_vien_thau"})
+		return
+	}
+
+	updatedUser, err := h.userRepo.UpdateRole(userID, req.Role)
+	if err != nil {
+		if err.Error() == "user not found" {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "User not found"})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	invalidateCurrentUserCache(userID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "User role updated successfully",
+		"user":    updatedUser.ToProfile(),
+	})
+}
+
+func (h *AuthHandler) DeleteManagedUser(c *gin.Context) {
+	currentUser, err := getCurrentUserFromAuthorizationHeader(c, h.userRepo, h.jwtSecret)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !userHasAnyRole(currentUser, RoleAdmin, RoleChiHuyKhoa) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only admin and chi_huy_khoa can manage accounts"})
+		return
+	}
+
+	userID, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || userID <= 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_USER_ID", Message: "User ID is invalid"})
+		return
+	}
+
+	if userID == currentUser.ID {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_OPERATION", Message: "Cannot delete your own account"})
+		return
+	}
+
+	if err := h.userRepo.DeactivateByID(userID); err != nil {
+		if err.Error() == "user not found" {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "User not found"})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	invalidateCurrentUserCache(userID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "User deleted successfully",
+	})
+}
+
 func (h *AuthHandler) generateToken(user *models.User) (string, time.Time, error) {
 	issuedAt := time.Now()
 	expiresAt := issuedAt.Add(time.Duration(h.jwtExpiresHours) * time.Hour)
@@ -317,7 +442,7 @@ func isAssignableRole(role string) bool {
 }
 
 func isAccountCreatorRole(role string) bool {
-	return role == RoleAdmin || role == RoleTruongKhoa
+	return role == RoleAdmin || role == RoleTruongKhoa || role == RoleChiHuyKhoa
 }
 
 func (h *AuthHandler) ensureCanCreateUser(c *gin.Context, requestedRole string) error {

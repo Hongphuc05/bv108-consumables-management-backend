@@ -107,8 +107,10 @@ func main() {
 
 	// Initialize repository and handler
 	supplyRepo := models.NewSupplyRepository(database.DB)
-	supplyHandler := handlers.NewSupplyHandler(supplyRepo)
 	userRepo := models.NewUserRepository(database.DB)
+	supplyTaskRepo := models.NewSupplyTaskRepository(database.DB)
+	supplyHandler := handlers.NewSupplyHandler(supplyRepo, userRepo, supplyTaskRepo, config.AppConfig.JWTSecret)
+	supplyTaskHandler := handlers.NewSupplyTaskHandler(supplyRepo, supplyTaskRepo, userRepo, config.AppConfig.JWTSecret)
 	authHandler := handlers.NewAuthHandler(userRepo, config.AppConfig.JWTSecret, config.AppConfig.JWTExpiresHours)
 	orderRepo := models.NewOrderRepository(database.DB)
 	invoiceMatchRepo := models.NewInvoiceReconciliationRepository(database.DB)
@@ -122,6 +124,7 @@ func main() {
 		startupStep{name: "invoice reconciliation schema", run: invoiceMatchRepo.EnsureSchema},
 		startupStep{name: "order unread schema", run: orderUnreadRepo.EnsureSchema},
 		startupStep{name: "forecast approval schema", run: forecastApprovalRepo.EnsureSchema},
+		startupStep{name: "supply task schema", run: supplyTaskRepo.EnsureSchema},
 	)
 	mustRunStartupStep("company contacts schema", companyContactRepo.EnsureSchema)
 	mustRunStartupStep("relational schema", schemaMaintenanceRepo.EnsureRelationalIntegrity)
@@ -174,6 +177,9 @@ func main() {
 			auth.POST("/login", authHandler.Login)
 			auth.GET("/profile", authHandler.GetProfile)
 			auth.PUT("/profile", authHandler.UpdateProfile)
+			auth.GET("/users", authHandler.ListManagedUsers)
+			auth.PUT("/users/:id/role", authHandler.UpdateManagedUserRole)
+			auth.DELETE("/users/:id", authHandler.DeleteManagedUser)
 		}
 
 		supplies := api.Group("/supplies")
@@ -190,6 +196,15 @@ func main() {
 			supplies.POST("/internal-sync", internalSupplySyncHandler.SyncNow)
 			supplies.POST("/compare", supplyHandler.CompareSupplies) // POST /api/supplies/compare
 			supplies.GET("/:id", supplyHandler.GetSupplyByID)        // GET /api/supplies/:id
+		}
+
+		supplyTasks := api.Group("/supply-tasks")
+		{
+			supplyTasks.GET("/state", supplyTaskHandler.GetState)
+			supplyTasks.GET("/catalog", supplyTaskHandler.GetSupplyCatalog)
+			supplyTasks.GET("/assignments", supplyTaskHandler.GetAssignmentsByUser)
+			supplyTasks.PUT("/visibility", supplyTaskHandler.UpdateVisibility)
+			supplyTasks.PUT("/assignments", supplyTaskHandler.UpdateAssignmentsByUser)
 		}
 
 		hoaDon := api.Group("/hoa-don")

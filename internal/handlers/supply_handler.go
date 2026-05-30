@@ -12,7 +12,10 @@ import (
 )
 
 type SupplyHandler struct {
-	repo *models.SupplyRepository
+	repo      *models.SupplyRepository
+	userRepo  *models.UserRepository
+	taskRepo  *models.SupplyTaskRepository
+	jwtSecret []byte
 }
 
 const (
@@ -22,8 +25,57 @@ const (
 )
 
 // NewSupplyHandler creates a new supply handler
-func NewSupplyHandler(repo *models.SupplyRepository) *SupplyHandler {
-	return &SupplyHandler{repo: repo}
+func NewSupplyHandler(
+	repo *models.SupplyRepository,
+	userRepo *models.UserRepository,
+	taskRepo *models.SupplyTaskRepository,
+	jwtSecret string,
+) *SupplyHandler {
+	return &SupplyHandler{
+		repo:      repo,
+		userRepo:  userRepo,
+		taskRepo:  taskRepo,
+		jwtSecret: []byte(jwtSecret),
+	}
+}
+
+func (h *SupplyHandler) getVisibleSupplyIDX1ForRequester(c *gin.Context) ([]int, bool) {
+	currentUser, err := getCurrentUserFromAuthorizationHeader(c, h.userRepo, h.jwtSecret)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Error:   "UNAUTHORIZED",
+			Message: "Yêu cầu đăng nhập hợp lệ",
+		})
+		return nil, false
+	}
+
+	if userHasAnyRole(currentUser, RoleAdmin, RoleChiHuyKhoa) {
+		return nil, true
+	}
+
+	hideForOtherRoles, err := h.taskRepo.IsHideForOtherRolesEnabled()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error:   "DATABASE_ERROR",
+			Message: err.Error(),
+		})
+		return nil, false
+	}
+
+	if !hideForOtherRoles {
+		return nil, true
+	}
+
+	visibleIDX1, err := h.taskRepo.GetAssignedSupplyIDX1ByUserID(currentUser.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error:   "DATABASE_ERROR",
+			Message: err.Error(),
+		})
+		return nil, false
+	}
+
+	return visibleIDX1, true
 }
 
 // PaginationResponse represents a paginated response
@@ -73,9 +125,14 @@ func parsePagination(c *gin.Context) (int, int) {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/supplies [get]
 func (h *SupplyHandler) GetAllSupplies(c *gin.Context) {
+	visibleIDX1, ok := h.getVisibleSupplyIDX1ForRequester(c)
+	if !ok {
+		return
+	}
+
 	page, pageSize := parsePagination(c)
 
-	supplies, total, err := h.repo.GetAll(page, pageSize)
+	supplies, total, err := h.repo.GetAllVisible(page, pageSize, visibleIDX1)
 	if err != nil {
 		log.Printf("❌ Error getting supplies: %v", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
@@ -107,6 +164,11 @@ func (h *SupplyHandler) GetAllSupplies(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/supplies/{id} [get]
 func (h *SupplyHandler) GetSupplyByID(c *gin.Context) {
+	visibleIDX1, ok := h.getVisibleSupplyIDX1ForRequester(c)
+	if !ok {
+		return
+	}
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -116,7 +178,7 @@ func (h *SupplyHandler) GetSupplyByID(c *gin.Context) {
 		return
 	}
 
-	supply, err := h.repo.GetByID(id)
+	supply, err := h.repo.GetByIDVisible(id, visibleIDX1)
 	if err != nil {
 		if err.Error() == "supply not found" {
 			c.JSON(http.StatusNotFound, ErrorResponse{
@@ -147,6 +209,11 @@ func (h *SupplyHandler) GetSupplyByID(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/supplies/search [get]
 func (h *SupplyHandler) SearchSupplies(c *gin.Context) {
+	visibleIDX1, ok := h.getVisibleSupplyIDX1ForRequester(c)
+	if !ok {
+		return
+	}
+
 	keyword := c.Query("keyword")
 	if keyword == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -158,7 +225,7 @@ func (h *SupplyHandler) SearchSupplies(c *gin.Context) {
 
 	page, pageSize := parsePagination(c)
 
-	supplies, total, err := h.repo.SearchByName(keyword, page, pageSize)
+	supplies, total, err := h.repo.SearchByNameVisible(keyword, page, pageSize, visibleIDX1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error:   "DATABASE_ERROR",
@@ -190,6 +257,11 @@ func (h *SupplyHandler) SearchSupplies(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/supplies/group [get]
 func (h *SupplyHandler) GetSuppliesByGroup(c *gin.Context) {
+	visibleIDX1, ok := h.getVisibleSupplyIDX1ForRequester(c)
+	if !ok {
+		return
+	}
+
 	groupName := c.Query("groupName")
 	if groupName == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -201,7 +273,7 @@ func (h *SupplyHandler) GetSuppliesByGroup(c *gin.Context) {
 
 	page, pageSize := parsePagination(c)
 
-	supplies, total, err := h.repo.GetByGroup(groupName, page, pageSize)
+	supplies, total, err := h.repo.GetByGroupVisible(groupName, page, pageSize, visibleIDX1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error:   "DATABASE_ERROR",
@@ -229,7 +301,12 @@ func (h *SupplyHandler) GetSuppliesByGroup(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/supplies/groups [get]
 func (h *SupplyHandler) GetAllGroups(c *gin.Context) {
-	groups, err := h.repo.GetAllGroups()
+	visibleIDX1, ok := h.getVisibleSupplyIDX1ForRequester(c)
+	if !ok {
+		return
+	}
+
+	groups, err := h.repo.GetAllGroupsVisible(visibleIDX1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error:   "DATABASE_ERROR",
@@ -255,10 +332,15 @@ func (h *SupplyHandler) GetAllGroups(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/supplies/low-stock [get]
 func (h *SupplyHandler) GetLowStockSupplies(c *gin.Context) {
+	visibleIDX1, ok := h.getVisibleSupplyIDX1ForRequester(c)
+	if !ok {
+		return
+	}
+
 	threshold, _ := strconv.Atoi(c.DefaultQuery("threshold", "20"))
 	page, pageSize := parsePagination(c)
 
-	supplies, total, err := h.repo.GetLowStock(threshold, page, pageSize)
+	supplies, total, err := h.repo.GetLowStockVisible(threshold, page, pageSize, visibleIDX1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error:   "DATABASE_ERROR",
@@ -416,9 +498,14 @@ func (h *SupplyHandler) CompareSupplies(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/supplies/forecast-catalog [get]
 func (h *SupplyHandler) GetForecastCatalog(c *gin.Context) {
+	visibleIDX1, ok := h.getVisibleSupplyIDX1ForRequester(c)
+	if !ok {
+		return
+	}
+
 	keyword := c.Query("keyword")
 
-	supplies, err := h.repo.GetForecastCatalog(keyword)
+	supplies, err := h.repo.GetForecastCatalogVisible(keyword, visibleIDX1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error:   "DATABASE_ERROR",
