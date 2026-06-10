@@ -21,7 +21,7 @@ type InvoiceReconciliationRecord struct {
 	ID                      int64      `json:"id"`
 	OrderHistoryID          int64      `json:"orderHistoryId"`
 	OrderBatchKey           string     `json:"orderBatchKey"`
-	CompanyContactID        *int64     `json:"companyContactId,omitempty"`
+	CompanyContactID *string     `json:"companyContactId,omitempty"`
 	NhaThau                 string     `json:"nhaThau"`
 	MaQuanLy                string     `json:"maQuanLy"`
 	MaVtytCu                string     `json:"maVtytCu"`
@@ -31,7 +31,7 @@ type InvoiceReconciliationRecord struct {
 	InvoiceNumber           string     `json:"invoiceNumber"`
 	InvoiceIDHoaDon         string     `json:"invoiceIdHoaDon,omitempty"`
 	InvoiceRowID            *int64     `json:"invoiceRowId,omitempty"`
-	InvoiceCompanyContactID *int64     `json:"invoiceCompanyContactId,omitempty"`
+	InvoiceCompanyContactID *string     `json:"invoiceCompanyContactId,omitempty"`
 	InvoiceCompanyName      string     `json:"invoiceCompanyName,omitempty"`
 	InvoiceItemCode         string     `json:"invoiceItemCode,omitempty"`
 	InvoiceItemName         string     `json:"invoiceItemName,omitempty"`
@@ -55,7 +55,7 @@ type InvoiceReconciliationRecord struct {
 type UpsertInvoiceReconciliationInput struct {
 	OrderHistoryID          int64
 	OrderBatchKey           string
-	CompanyContactID        *int64
+	CompanyContactID *string
 	NhaThau                 string
 	MaQuanLy                string
 	MaVtytCu                string
@@ -65,7 +65,7 @@ type UpsertInvoiceReconciliationInput struct {
 	InvoiceNumber           string
 	InvoiceIDHoaDon         string
 	InvoiceRowID            *int64
-	InvoiceCompanyContactID *int64
+	InvoiceCompanyContactID *string
 	InvoiceCompanyName      string
 	InvoiceItemCode         string
 	InvoiceItemName         string
@@ -108,7 +108,7 @@ func (r *InvoiceReconciliationRepository) EnsureSchema() error {
 			id BIGINT NOT NULL AUTO_INCREMENT,
 			order_history_id BIGINT NOT NULL,
 			order_batch_key VARCHAR(255) NOT NULL DEFAULT '',
-			company_contact_id BIGINT NULL,
+			company_contact_id VARCHAR(50) NULL,
 			nha_thau VARCHAR(255) NOT NULL,
 			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
 			ma_vtyt_cu VARCHAR(255) NOT NULL,
@@ -118,7 +118,7 @@ func (r *InvoiceReconciliationRepository) EnsureSchema() error {
 			invoice_number VARCHAR(128) NOT NULL,
 			invoice_id_hoa_don VARCHAR(128) NOT NULL DEFAULT '',
 			invoice_row_id BIGINT NULL,
-			invoice_company_contact_id BIGINT NULL,
+			invoice_company_contact_id VARCHAR(50) NULL,
 			invoice_company_name VARCHAR(255) NOT NULL DEFAULT '',
 			invoice_item_code VARCHAR(255) NOT NULL DEFAULT '',
 			invoice_item_name VARCHAR(500) NOT NULL DEFAULT '',
@@ -233,10 +233,10 @@ func (r *InvoiceReconciliationRepository) ListByMonthYear(month, year int) ([]In
 	records := make([]InvoiceReconciliationRecord, 0)
 	for rows.Next() {
 		var item InvoiceReconciliationRecord
-		var companyContactID sql.NullInt64
+		var companyContactID sql.NullString
 		var orderTime sql.NullTime
 		var invoiceRowID sql.NullInt64
-		var invoiceCompanyContactID sql.NullInt64
+		var invoiceCompanyContactID sql.NullString
 		var invoiceTime sql.NullTime
 		var hasInvoice int
 		var matchedByUserID sql.NullInt64
@@ -280,7 +280,7 @@ func (r *InvoiceReconciliationRepository) ListByMonthYear(month, year int) ([]In
 		}
 
 		if companyContactID.Valid {
-			value := companyContactID.Int64
+			value := companyContactID.String
 			item.CompanyContactID = &value
 		}
 		if orderTime.Valid {
@@ -292,7 +292,7 @@ func (r *InvoiceReconciliationRepository) ListByMonthYear(month, year int) ([]In
 			item.InvoiceRowID = &value
 		}
 		if invoiceCompanyContactID.Valid {
-			value := invoiceCompanyContactID.Int64
+			value := invoiceCompanyContactID.String
 			item.InvoiceCompanyContactID = &value
 		}
 		if invoiceTime.Valid {
@@ -396,10 +396,10 @@ func (r *InvoiceReconciliationRepository) ListAllReconciliations() ([]InvoiceRec
 	records := make([]InvoiceReconciliationRecord, 0)
 	for rows.Next() {
 		var item InvoiceReconciliationRecord
-		var companyContactID sql.NullInt64
+		var companyContactID sql.NullString
 		var orderTime sql.NullTime
 		var invoiceRowID sql.NullInt64
-		var invoiceCompanyContactID sql.NullInt64
+		var invoiceCompanyContactID sql.NullString
 		var invoiceTime sql.NullTime
 		var hasInvoice int
 		var matchedByUserID sql.NullInt64
@@ -443,7 +443,7 @@ func (r *InvoiceReconciliationRepository) ListAllReconciliations() ([]InvoiceRec
 		}
 
 		if companyContactID.Valid {
-			value := companyContactID.Int64
+			value := companyContactID.String
 			item.CompanyContactID = &value
 		}
 		if orderTime.Valid {
@@ -455,7 +455,7 @@ func (r *InvoiceReconciliationRepository) ListAllReconciliations() ([]InvoiceRec
 			item.InvoiceRowID = &value
 		}
 		if invoiceCompanyContactID.Valid {
-			value := invoiceCompanyContactID.Int64
+			value := invoiceCompanyContactID.String
 			item.InvoiceCompanyContactID = &value
 		}
 		if invoiceTime.Valid {

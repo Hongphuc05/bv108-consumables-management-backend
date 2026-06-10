@@ -379,32 +379,48 @@ func (h *OrderHandler) CreateForecastOrders(c *gin.Context) {
 	inputs := make([]models.CreatePendingOrderInput, 0, len(req.Items))
 	approvalTime := time.Now().Format(time.RFC3339)
 	createdGroupKeys := make([]string, 0, len(req.Items))
+	skippedCount := 0
 	for _, item := range req.Items {
 		if item.DotGoiHang < 1 {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "dotGoiHang must be greater than 0"})
+			skippedCount++
+			continue
+		}
+
+		companyContactID, resolvedEmail, err := h.resolveForecastOrderContact(item)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
 			return
 		}
 
 		groupKey := buildPendingOrderGroupKey(item.NhaThau, approvalTime)
 
 		inputs = append(inputs, models.CreatePendingOrderInput{
-			NhaThau:      sanitizeText(item.NhaThau),
-			MaQuanLy:     sanitizeText(item.MaQuanLy),
-			MaVtytCu:     sanitizeText(item.MaVtytCu),
-			TenVtytBv:    sanitizeText(item.TenVtytBv),
-			MaHieu:       sanitizeText(item.MaHieu),
-			HangSx:       sanitizeText(item.HangSx),
-			DonViTinh:    sanitizeText(item.DonViTinh),
-			QuyCach:      sanitizeText(item.QuyCach),
-			DotGoiHang:   item.DotGoiHang,
-			Email:        sanitizeText(item.Email),
-			Source:       models.OrderSourceForecast,
-			GroupKey:     groupKey,
-			Approver:     &models.OrderActor{ID: currentUser.ID, Username: currentUser.Username, Email: currentUser.Email},
-			CreatedBy:    models.OrderActor{ID: currentUser.ID, Username: currentUser.Username, Email: currentUser.Email},
-			ApprovalTime: approvalTime,
+			CompanyContactID: companyContactID,
+			NhaThau:          sanitizeText(item.NhaThau),
+			MaQuanLy:         sanitizeText(item.MaQuanLy),
+			MaVtytCu:         sanitizeText(item.MaVtytCu),
+			TenVtytBv:        sanitizeText(item.TenVtytBv),
+			MaHieu:           sanitizeText(item.MaHieu),
+			HangSx:           sanitizeText(item.HangSx),
+			DonViTinh:        sanitizeText(item.DonViTinh),
+			QuyCach:          sanitizeText(item.QuyCach),
+			DotGoiHang:       item.DotGoiHang,
+			Email:            resolvedEmail,
+			Source:           models.OrderSourceForecast,
+			GroupKey:         groupKey,
+			Approver:         &models.OrderActor{ID: currentUser.ID, Username: currentUser.Username, Email: currentUser.Email},
+			CreatedBy:        models.OrderActor{ID: currentUser.ID, Username: currentUser.Username, Email: currentUser.Email},
+			ApprovalTime:     approvalTime,
 		})
 		createdGroupKeys = append(createdGroupKeys, groupKey)
+	}
+
+	if len(inputs) == 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error:   "INVALID_REQUEST",
+			Message: "No approved items have dotGoiHang greater than 0",
+		})
+		return
 	}
 
 	if err := h.repo.AddForecastOrders(inputs); err != nil {
@@ -432,9 +448,32 @@ func (h *OrderHandler) CreateForecastOrders(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "Forecast orders added to pending list successfully",
-		"count":   len(inputs),
+		"message":      "Forecast orders added to pending list successfully",
+		"count":        len(inputs),
+		"skippedCount": skippedCount,
 	})
+}
+
+func (h *OrderHandler) resolveForecastOrderContact(item CreateOrderItemRequest) (*string, string, error) {
+	if email := sanitizeText(item.Email); email != "" {
+		return nil, email, nil
+	}
+
+	if h.companyContactRepo != nil {
+		contact, err := h.companyContactRepo.GetByCompanyName(item.NhaThau)
+		if err != nil {
+			return nil, "", err
+		}
+		if contact != nil && strings.TrimSpace(contact.Email) != "" {
+			maSoThue := strings.TrimSpace(contact.MaSoThue)
+			if maSoThue == "" {
+				return nil, strings.TrimSpace(contact.Email), nil
+			}
+			return &maSoThue, strings.TrimSpace(contact.Email), nil
+		}
+	}
+
+	return nil, models.DefaultCompanyContactEmail, nil
 }
 
 func (h *OrderHandler) CreateManualOrder(c *gin.Context) {

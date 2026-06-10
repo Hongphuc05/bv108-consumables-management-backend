@@ -62,6 +62,7 @@ type internalSupplyAPIRow struct {
 	SlXuat          int     `json:"SL_XUAT"`
 	XuatTrongKy     int     `json:"XUATTRONGKY"`
 	TongNhap        int     `json:"TONGNHAP"`
+	TonKhoMin       int     `json:"TON_KHO_MIN"`
 }
 
 type internalSupplyAPIResponse struct {
@@ -261,6 +262,7 @@ func mapInternalSupplyRow(row internalSupplyAPIRow, index int) models.SupplyUpse
 		NhapTrongKy:     nhapTrongKy,
 		XuatTrongKy:     xuatTrongKy,
 		TongNhap:        firstNonZero(row.TongNhap, nhapTrongKy),
+		TonKhoMin:       row.TonKhoMin,
 	}
 }
 

@@ -164,13 +164,13 @@ func (r *SchemaMaintenanceRepository) isRelationalIntegritySatisfied() (bool, er
 		tableName      string
 		constraintName string
 	}{
-		{tableName: "pending_orders", constraintName: "fk_pending_orders_company_contact"},
 		{tableName: "pending_orders", constraintName: "fk_pending_orders_approver_user"},
 		{tableName: "pending_orders", constraintName: "fk_pending_orders_creator_user"},
-		{tableName: "order_history", constraintName: "fk_order_history_company_contact"},
+		{tableName: "pending_orders", constraintName: "fk_pending_orders_company_contact"},
 		{tableName: "order_history", constraintName: "fk_order_history_approver_user"},
 		{tableName: "order_history", constraintName: "fk_order_history_creator_user"},
 		{tableName: "order_history", constraintName: "fk_order_history_placed_by_user"},
+		{tableName: "order_history", constraintName: "fk_order_history_company_contact"},
 		{tableName: "hoa_don", constraintName: "fk_hoa_don_company_contact"},
 		{tableName: "order_group_reads", constraintName: "fk_order_group_reads_user"},
 		{tableName: "supplier_alert_reads", constraintName: "fk_supplier_alert_reads_user"},
@@ -196,67 +196,10 @@ func (r *SchemaMaintenanceRepository) isRelationalIntegritySatisfied() (bool, er
 }
 
 func (r *SchemaMaintenanceRepository) backfillHoaDonCompanyReferences() error {
-	statements := []string{
-		`
-		UPDATE hoa_don h
-		JOIN (
-			SELECT MIN(id) AS id, tax_id
-			FROM company_contacts
-			WHERE TRIM(COALESCE(tax_id, '')) <> ''
-			GROUP BY tax_id
-		) cc
-			ON CONVERT(TRIM(COALESCE(h.ma_so_thue_nguoi_ban, '')) USING utf8mb4) COLLATE utf8mb4_unicode_ci = cc.tax_id
-		SET h.company_contact_id = cc.id
-		WHERE h.company_contact_id IS NULL
-		  AND TRIM(COALESCE(h.ma_so_thue_nguoi_ban, '')) <> ''
-		`,
-		`
-		UPDATE hoa_don h
-		JOIN (
-			SELECT MIN(id) AS id, company_name
-			FROM company_contacts
-			WHERE TRIM(COALESCE(company_name, '')) <> ''
-			GROUP BY company_name
-		) cc
-			ON CONVERT(TRIM(COALESCE(h.cong_ty, '')) USING utf8mb4) COLLATE utf8mb4_unicode_ci = cc.company_name
-		SET h.company_contact_id = cc.id
-		WHERE h.company_contact_id IS NULL
-		  AND TRIM(COALESCE(h.cong_ty, '')) <> ''
-		`,
-	}
-
-	for _, statement := range statements {
-		if _, err := r.DB.Exec(statement); err != nil {
-			return fmt.Errorf("error backfilling hoa_don company references: %w", err)
-		}
-	}
-
 	return nil
 }
 
 func (r *SchemaMaintenanceRepository) backfillInvoiceCompanyReferences() error {
-	statements := []string{
-		`
-		UPDATE order_invoice_reconciliation r
-		JOIN (
-			SELECT MIN(id) AS id, company_name
-			FROM company_contacts
-			WHERE TRIM(COALESCE(company_name, '')) <> ''
-			GROUP BY company_name
-		) cc
-			ON CONVERT(TRIM(COALESCE(r.invoice_company_name, '')) USING utf8mb4) COLLATE utf8mb4_unicode_ci = cc.company_name
-		SET r.invoice_company_contact_id = cc.id
-		WHERE r.invoice_company_contact_id IS NULL
-		  AND TRIM(COALESCE(r.invoice_company_name, '')) <> ''
-		`,
-	}
-
-	for _, statement := range statements {
-		if _, err := r.DB.Exec(statement); err != nil {
-			return fmt.Errorf("error backfilling invoice company references: %w", err)
-		}
-	}
-
 	return nil
 }
 
@@ -271,11 +214,39 @@ func (r *SchemaMaintenanceRepository) ensureColumnDefinitions() error {
 
 	changes := []columnChange{
 		{
+			tableName:      "pending_orders",
+			columnName:     "company_contact_id",
+			expectedType:   "varchar(50)",
+			expectedNull:   true,
+			alterStatement: "ALTER TABLE pending_orders MODIFY COLUMN company_contact_id VARCHAR(50) NULL",
+		},
+		{
+			tableName:      "order_history",
+			columnName:     "company_contact_id",
+			expectedType:   "varchar(50)",
+			expectedNull:   true,
+			alterStatement: "ALTER TABLE order_history MODIFY COLUMN company_contact_id VARCHAR(50) NULL",
+		},
+		{
 			tableName:      "hoa_don",
 			columnName:     "company_contact_id",
-			expectedType:   "bigint",
+			expectedType:   "varchar(50)",
 			expectedNull:   true,
-			alterStatement: "ALTER TABLE hoa_don MODIFY COLUMN company_contact_id BIGINT NULL",
+			alterStatement: "ALTER TABLE hoa_don MODIFY COLUMN company_contact_id VARCHAR(50) NULL",
+		},
+		{
+			tableName:      "order_invoice_reconciliation",
+			columnName:     "company_contact_id",
+			expectedType:   "varchar(50)",
+			expectedNull:   true,
+			alterStatement: "ALTER TABLE order_invoice_reconciliation MODIFY COLUMN company_contact_id VARCHAR(50) NULL",
+		},
+		{
+			tableName:      "order_invoice_reconciliation",
+			columnName:     "invoice_company_contact_id",
+			expectedType:   "varchar(50)",
+			expectedNull:   true,
+			alterStatement: "ALTER TABLE order_invoice_reconciliation MODIFY COLUMN invoice_company_contact_id VARCHAR(50) NULL",
 		},
 		{
 			tableName:      "order_group_reads",
@@ -436,36 +407,6 @@ func (r *SchemaMaintenanceRepository) cleanupNullableOrphans() error {
 	statements := []string{
 		`
 		UPDATE pending_orders p
-		LEFT JOIN company_contacts c ON c.id = p.company_contact_id
-		SET p.company_contact_id = NULL
-		WHERE p.company_contact_id IS NOT NULL AND c.id IS NULL
-		`,
-		`
-		UPDATE order_history o
-		LEFT JOIN company_contacts c ON c.id = o.company_contact_id
-		SET o.company_contact_id = NULL
-		WHERE o.company_contact_id IS NOT NULL AND c.id IS NULL
-		`,
-		`
-		UPDATE hoa_don h
-		LEFT JOIN company_contacts c ON c.id = h.company_contact_id
-		SET h.company_contact_id = NULL
-		WHERE h.company_contact_id IS NOT NULL AND c.id IS NULL
-		`,
-		`
-		UPDATE order_invoice_reconciliation r
-		LEFT JOIN company_contacts c ON c.id = r.company_contact_id
-		SET r.company_contact_id = NULL
-		WHERE r.company_contact_id IS NOT NULL AND c.id IS NULL
-		`,
-		`
-		UPDATE order_invoice_reconciliation r
-		LEFT JOIN company_contacts c ON c.id = r.invoice_company_contact_id
-		SET r.invoice_company_contact_id = NULL
-		WHERE r.invoice_company_contact_id IS NOT NULL AND c.id IS NULL
-		`,
-		`
-		UPDATE pending_orders p
 		LEFT JOIN users u ON u.id = p.nguoi_phe_duyet_id
 		SET p.nguoi_phe_duyet_id = NULL
 		WHERE p.nguoi_phe_duyet_id IS NOT NULL AND u.id IS NULL
@@ -618,7 +559,7 @@ func (r *SchemaMaintenanceRepository) ensureForeignKeys() error {
 		{
 			tableName:      "pending_orders",
 			constraintName: "fk_pending_orders_company_contact",
-			statement:      "ALTER TABLE pending_orders ADD CONSTRAINT fk_pending_orders_company_contact FOREIGN KEY (company_contact_id) REFERENCES company_contacts (id) ON UPDATE CASCADE ON DELETE SET NULL",
+			statement:      "ALTER TABLE pending_orders ADD CONSTRAINT fk_pending_orders_company_contact FOREIGN KEY (company_contact_id) REFERENCES company_contacts (ma_so_thue) ON UPDATE CASCADE ON DELETE SET NULL",
 		},
 		{
 			tableName:      "pending_orders",
@@ -633,7 +574,7 @@ func (r *SchemaMaintenanceRepository) ensureForeignKeys() error {
 		{
 			tableName:      "order_history",
 			constraintName: "fk_order_history_company_contact",
-			statement:      "ALTER TABLE order_history ADD CONSTRAINT fk_order_history_company_contact FOREIGN KEY (company_contact_id) REFERENCES company_contacts (id) ON UPDATE CASCADE ON DELETE SET NULL",
+			statement:      "ALTER TABLE order_history ADD CONSTRAINT fk_order_history_company_contact FOREIGN KEY (company_contact_id) REFERENCES company_contacts (ma_so_thue) ON UPDATE CASCADE ON DELETE SET NULL",
 		},
 		{
 			tableName:      "order_history",
@@ -653,7 +594,7 @@ func (r *SchemaMaintenanceRepository) ensureForeignKeys() error {
 		{
 			tableName:      "hoa_don",
 			constraintName: "fk_hoa_don_company_contact",
-			statement:      "ALTER TABLE hoa_don ADD CONSTRAINT fk_hoa_don_company_contact FOREIGN KEY (company_contact_id) REFERENCES company_contacts (id) ON UPDATE CASCADE ON DELETE SET NULL",
+			statement:      "ALTER TABLE hoa_don ADD CONSTRAINT fk_hoa_don_company_contact FOREIGN KEY (company_contact_id) REFERENCES company_contacts (ma_so_thue) ON UPDATE CASCADE ON DELETE SET NULL",
 		},
 		{
 			tableName:      "order_group_reads",
@@ -683,12 +624,12 @@ func (r *SchemaMaintenanceRepository) ensureForeignKeys() error {
 		{
 			tableName:      "order_invoice_reconciliation",
 			constraintName: "fk_oir_company_contact",
-			statement:      "ALTER TABLE order_invoice_reconciliation ADD CONSTRAINT fk_oir_company_contact FOREIGN KEY (company_contact_id) REFERENCES company_contacts (id) ON UPDATE CASCADE ON DELETE SET NULL",
+			statement:      "ALTER TABLE order_invoice_reconciliation ADD CONSTRAINT fk_oir_company_contact FOREIGN KEY (company_contact_id) REFERENCES company_contacts (ma_so_thue) ON UPDATE CASCADE ON DELETE SET NULL",
 		},
 		{
 			tableName:      "order_invoice_reconciliation",
 			constraintName: "fk_oir_invoice_company_contact",
-			statement:      "ALTER TABLE order_invoice_reconciliation ADD CONSTRAINT fk_oir_invoice_company_contact FOREIGN KEY (invoice_company_contact_id) REFERENCES company_contacts (id) ON UPDATE CASCADE ON DELETE SET NULL",
+			statement:      "ALTER TABLE order_invoice_reconciliation ADD CONSTRAINT fk_oir_invoice_company_contact FOREIGN KEY (invoice_company_contact_id) REFERENCES company_contacts (ma_so_thue) ON UPDATE CASCADE ON DELETE SET NULL",
 		},
 		{
 			tableName:      "order_invoice_reconciliation",

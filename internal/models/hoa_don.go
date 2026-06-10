@@ -8,7 +8,7 @@ import (
 // HoaDon represents an invoice record from UBot
 type HoaDon struct {
 	ID               int       `json:"id"`
-	CompanyContactID *int64    `json:"companyContactId,omitempty"`
+	CompanyContactID *string    `json:"companyContactId,omitempty"`
 	TrangThaiHoaDon  string    `json:"trangThaiHoaDon"`
 	LoaiHoaDon       string    `json:"loaiHoaDon"`
 	SoHoaDon         string    `json:"soHoaDon"`
@@ -59,7 +59,7 @@ func (r *HoaDonRepository) GetAll(limit, offset int) ([]HoaDon, error) {
 	var hoaDons []HoaDon
 	for rows.Next() {
 		var hd HoaDon
-		var companyContactID sql.NullInt64
+		var companyContactID sql.NullString
 		err := rows.Scan(
 			&hd.ID, &companyContactID, &hd.TrangThaiHoaDon, &hd.LoaiHoaDon, &hd.SoHoaDon, &hd.NgayHoaDon,
 			&hd.MaSoThueNguoiBan, &hd.CongTy, &hd.DiaChi, &hd.LinkTraCuuHoaDon,
@@ -70,7 +70,7 @@ func (r *HoaDonRepository) GetAll(limit, offset int) ([]HoaDon, error) {
 			return nil, err
 		}
 		if companyContactID.Valid {
-			value := companyContactID.Int64
+			value := companyContactID.String
 			hd.CompanyContactID = &value
 		}
 		hoaDons = append(hoaDons, hd)
@@ -109,7 +109,7 @@ func (r *HoaDonRepository) GetByIDHoaDon(idHoaDon string) ([]HoaDon, error) {
 	var hoaDons []HoaDon
 	for rows.Next() {
 		var hd HoaDon
-		var companyContactID sql.NullInt64
+		var companyContactID sql.NullString
 		err := rows.Scan(
 			&hd.ID, &companyContactID, &hd.TrangThaiHoaDon, &hd.LoaiHoaDon, &hd.SoHoaDon, &hd.NgayHoaDon,
 			&hd.MaSoThueNguoiBan, &hd.CongTy, &hd.DiaChi, &hd.LinkTraCuuHoaDon,
@@ -120,7 +120,7 @@ func (r *HoaDonRepository) GetByIDHoaDon(idHoaDon string) ([]HoaDon, error) {
 			return nil, err
 		}
 		if companyContactID.Valid {
-			value := companyContactID.Int64
+			value := companyContactID.String
 			hd.CompanyContactID = &value
 		}
 		hoaDons = append(hoaDons, hd)
@@ -157,7 +157,7 @@ func (r *HoaDonRepository) SearchByKeyword(keyword string, limit, offset int) ([
 	var hoaDons []HoaDon
 	for rows.Next() {
 		var hd HoaDon
-		var companyContactID sql.NullInt64
+		var companyContactID sql.NullString
 		err := rows.Scan(
 			&hd.ID, &companyContactID, &hd.TrangThaiHoaDon, &hd.LoaiHoaDon, &hd.SoHoaDon, &hd.NgayHoaDon,
 			&hd.MaSoThueNguoiBan, &hd.CongTy, &hd.DiaChi, &hd.LinkTraCuuHoaDon,
@@ -168,7 +168,7 @@ func (r *HoaDonRepository) SearchByKeyword(keyword string, limit, offset int) ([
 			return nil, err
 		}
 		if companyContactID.Valid {
-			value := companyContactID.Int64
+			value := companyContactID.String
 			hd.CompanyContactID = &value
 		}
 		hoaDons = append(hoaDons, hd)

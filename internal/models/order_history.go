@@ -20,7 +20,7 @@ type OrderActor struct {
 
 type PendingOrder struct {
 	ID                 int64  `json:"id"`
-	CompanyContactID   *int64 `json:"companyContactId,omitempty"`
+	CompanyContactID *string `json:"companyContactId,omitempty"`
 	NhaThau            string `json:"nhaThau"`
 	MaQuanLy           string `json:"maQuanLy"`
 	MaVtytCu           string `json:"maVtytCu"`
@@ -54,21 +54,22 @@ type OrderHistoryRecord struct {
 }
 
 type CreatePendingOrderInput struct {
-	NhaThau      string
-	MaQuanLy     string
-	MaVtytCu     string
-	TenVtytBv    string
-	MaHieu       string
-	HangSx       string
-	DonViTinh    string
-	QuyCach      string
-	DotGoiHang   int
-	Email        string
-	Source       string
-	GroupKey     string
-	Approver     *OrderActor
-	CreatedBy    OrderActor
-	ApprovalTime string
+	CompanyContactID *string
+	NhaThau          string
+	MaQuanLy         string
+	MaVtytCu         string
+	TenVtytBv        string
+	MaHieu           string
+	HangSx           string
+	DonViTinh        string
+	QuyCach          string
+	DotGoiHang       int
+	Email            string
+	Source           string
+	GroupKey         string
+	Approver         *OrderActor
+	CreatedBy        OrderActor
+	ApprovalTime     string
 }
 
 type OrderRepository struct {
@@ -84,7 +85,7 @@ func (r *OrderRepository) EnsureSchema() error {
 		`
 		CREATE TABLE IF NOT EXISTS pending_orders (
 			id BIGINT NOT NULL AUTO_INCREMENT,
-			company_contact_id BIGINT NULL,
+			company_contact_id VARCHAR(50) NULL,
 			nha_thau VARCHAR(255) NOT NULL,
 			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
 			ma_vtyt_cu VARCHAR(255) NOT NULL,
@@ -119,7 +120,7 @@ func (r *OrderRepository) EnsureSchema() error {
 		CREATE TABLE IF NOT EXISTS order_history (
 			id BIGINT NOT NULL AUTO_INCREMENT,
 			pending_order_id BIGINT NULL,
-			company_contact_id BIGINT NULL,
+			company_contact_id VARCHAR(50) NULL,
 			nha_thau VARCHAR(255) NOT NULL,
 			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
 			ma_vtyt_cu VARCHAR(255) NOT NULL,
@@ -250,7 +251,7 @@ func (r *OrderRepository) ListPendingOrders() ([]PendingOrder, error) {
 	orders := make([]PendingOrder, 0)
 	for rows.Next() {
 		var order PendingOrder
-		var companyContactID sql.NullInt64
+		var companyContactID sql.NullString
 		if err := rows.Scan(
 			&order.ID,
 			&companyContactID,
@@ -278,7 +279,7 @@ func (r *OrderRepository) ListPendingOrders() ([]PendingOrder, error) {
 			return nil, fmt.Errorf("error scanning pending order: %w", err)
 		}
 		if companyContactID.Valid {
-			value := companyContactID.Int64
+			value := companyContactID.String
 			order.CompanyContactID = &value
 		}
 		orders = append(orders, order)
@@ -338,7 +339,7 @@ func (r *OrderRepository) GetPendingOrdersByIDs(orderIDs []int64) ([]PendingOrde
 	orders := make([]PendingOrder, 0, len(orderIDs))
 	for rows.Next() {
 		var order PendingOrder
-		var companyContactID sql.NullInt64
+		var companyContactID sql.NullString
 		if err := rows.Scan(
 			&order.ID,
 			&companyContactID,
@@ -366,7 +367,7 @@ func (r *OrderRepository) GetPendingOrdersByIDs(orderIDs []int64) ([]PendingOrde
 			return nil, fmt.Errorf("error scanning pending order by id: %w", err)
 		}
 		if companyContactID.Valid {
-			value := companyContactID.Int64
+			value := companyContactID.String
 			order.CompanyContactID = &value
 		}
 		orders = append(orders, order)
@@ -417,7 +418,7 @@ func (r *OrderRepository) ListOrderHistory() ([]OrderHistoryRecord, error) {
 	history := make([]OrderHistoryRecord, 0)
 	for rows.Next() {
 		var item OrderHistoryRecord
-		var companyContactID sql.NullInt64
+		var companyContactID sql.NullString
 		var emailSent int
 		if err := rows.Scan(
 			&item.ID,
@@ -448,7 +449,7 @@ func (r *OrderRepository) ListOrderHistory() ([]OrderHistoryRecord, error) {
 			return nil, fmt.Errorf("error scanning order history: %w", err)
 		}
 		if companyContactID.Valid {
-			value := companyContactID.Int64
+			value := companyContactID.String
 			item.CompanyContactID = &value
 		}
 		item.EmailSent = emailSent == 1
@@ -513,7 +514,7 @@ func (r *OrderRepository) GetOrderHistoryByIDs(orderIDs []int64) ([]OrderHistory
 	history := make([]OrderHistoryRecord, 0)
 	for rows.Next() {
 		var item OrderHistoryRecord
-		var companyContactID sql.NullInt64
+		var companyContactID sql.NullString
 		var emailSent int
 		if err := rows.Scan(
 			&item.ID,
@@ -544,7 +545,7 @@ func (r *OrderRepository) GetOrderHistoryByIDs(orderIDs []int64) ([]OrderHistory
 			return nil, fmt.Errorf("error scanning order history by ids: %w", err)
 		}
 		if companyContactID.Valid {
-			value := companyContactID.Int64
+			value := companyContactID.String
 			item.CompanyContactID = &value
 		}
 		item.EmailSent = emailSent == 1
@@ -679,7 +680,7 @@ func buildOrderBatchSignature(item OrderHistoryRecord) string {
 
 func buildOrderCompanyKey(item OrderHistoryRecord) string {
 	if item.CompanyContactID != nil {
-		return fmt.Sprintf("cc-%d", *item.CompanyContactID)
+		return fmt.Sprintf("cc-%s", *item.CompanyContactID)
 	}
 
 	name := strings.TrimSpace(strings.ToLower(item.NhaThau))
@@ -786,7 +787,7 @@ func (r *OrderRepository) PlaceOrders(orderIDs []int64, placedBy OrderActor) (in
 
 	type pendingOrderRow struct {
 		ID                 int64
-		CompanyContactID   sql.NullInt64
+		CompanyContactID   sql.NullString
 		NhaThau            string
 		MaQuanLy           string
 		MaVtytCu           string
@@ -882,7 +883,7 @@ func (r *OrderRepository) PlaceOrders(orderIDs []int64, placedBy OrderActor) (in
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			order.ID,
-			nullInt64ToValue(order.CompanyContactID),
+			nullStringToValue(order.CompanyContactID),
 			order.NhaThau,
 			order.MaQuanLy,
 			order.MaVtytCu,
@@ -933,7 +934,10 @@ func (r *OrderRepository) insertPendingOrderTx(tx *sql.Tx, input CreatePendingOr
 	if resolvedEmail == "" {
 		return fmt.Errorf("missing company email")
 	}
-	var companyContactID sql.NullInt64
+	var companyContactID interface{}
+	if input.CompanyContactID != nil {
+		companyContactID = *input.CompanyContactID
+	}
 
 	if _, err := tx.Exec(`
 		INSERT INTO pending_orders (
@@ -964,7 +968,7 @@ func (r *OrderRepository) insertPendingOrderTx(tx *sql.Tx, input CreatePendingOr
 		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
 	`,
-		nullInt64ToValue(companyContactID),
+		companyContactID,
 		input.NhaThau,
 		input.MaQuanLy,
 		input.MaVtytCu,
@@ -1084,6 +1088,13 @@ func nullInt64ToValue(value sql.NullInt64) interface{} {
 		return nil
 	}
 	return value.Int64
+}
+
+func nullStringToValue(value sql.NullString) interface{} {
+	if !value.Valid {
+		return nil
+	}
+	return value.String
 }
 
 func makePlaceholders(count int) string {

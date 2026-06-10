@@ -44,9 +44,7 @@ func (r *SupplyRepository) GetAllVisible(page, pageSize int, visibleIDX1 []int) 
 
 	query := `
 		SELECT
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
-			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
-			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
+			` + supplySelectColumns + `
 		FROM supplies
 		WHERE 1=1
 	` + filterClause + `
@@ -64,17 +62,10 @@ func (r *SupplyRepository) GetAllVisible(page, pageSize int, visibleIDX1 []int) 
 
 	supplies := []Supply{}
 	for rows.Next() {
-		var s Supply
-		if err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
-			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
-			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
-			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
-		); err != nil {
+		s, err := scanSupply(rows)
+		if err != nil {
 			return nil, 0, fmt.Errorf("error scanning supply: %w", err)
 		}
-
-		s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
 		supplies = append(supplies, s)
 	}
 
@@ -86,9 +77,7 @@ func (r *SupplyRepository) GetByIDVisible(idx1 int, visibleIDX1 []int) (*Supply,
 
 	query := `
 		SELECT
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
-			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
-			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
+			` + supplySelectColumns + `
 		FROM supplies
 		WHERE IDX1 = ?
 	` + filterClause
@@ -97,13 +86,7 @@ func (r *SupplyRepository) GetByIDVisible(idx1 int, visibleIDX1 []int) (*Supply,
 	args = append(args, idx1)
 	args = append(args, filterArgs...)
 
-	var s Supply
-	err := r.DB.QueryRow(query, args...).Scan(
-		&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
-		&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
-		&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
-		&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
-	)
+	s, err := scanSupply(r.DB.QueryRow(query, args...))
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("supply not found")
 	}
@@ -111,7 +94,6 @@ func (r *SupplyRepository) GetByIDVisible(idx1 int, visibleIDX1 []int) (*Supply,
 		return nil, fmt.Errorf("error querying supply: %w", err)
 	}
 
-	s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
 	return &s, nil
 }
 
@@ -134,9 +116,7 @@ func (r *SupplyRepository) SearchByNameVisible(keyword string, page, pageSize in
 
 	query := `
 		SELECT
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
-			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
-			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
+			` + supplySelectColumns + `
 		FROM supplies
 		WHERE (NAME LIKE ? OR ID LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?)
 	` + filterClause + `
@@ -156,17 +136,10 @@ func (r *SupplyRepository) SearchByNameVisible(keyword string, page, pageSize in
 
 	supplies := []Supply{}
 	for rows.Next() {
-		var s Supply
-		if err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
-			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
-			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
-			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
-		); err != nil {
+		s, err := scanSupply(rows)
+		if err != nil {
 			return nil, 0, fmt.Errorf("error scanning supply: %w", err)
 		}
-
-		s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
 		supplies = append(supplies, s)
 	}
 
@@ -187,9 +160,7 @@ func (r *SupplyRepository) GetByGroupVisible(groupName string, page, pageSize in
 
 	query := `
 		SELECT
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
-			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
-			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
+			` + supplySelectColumns + `
 		FROM supplies
 		WHERE GROUPNAME = ?
 	` + filterClause + `
@@ -209,17 +180,10 @@ func (r *SupplyRepository) GetByGroupVisible(groupName string, page, pageSize in
 
 	supplies := []Supply{}
 	for rows.Next() {
-		var s Supply
-		if err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
-			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
-			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
-			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
-		); err != nil {
+		s, err := scanSupply(rows)
+		if err != nil {
 			return nil, 0, fmt.Errorf("error scanning supply: %w", err)
 		}
-
-		s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
 		supplies = append(supplies, s)
 	}
 
@@ -267,9 +231,7 @@ func (r *SupplyRepository) GetLowStockVisible(threshold int, page, pageSize int,
 
 	query := `
 		SELECT
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
-			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
-			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
+			` + supplySelectColumns + `
 		FROM supplies
 		WHERE (TONDAUKY + NHAPTRONGKY - XUATTRONGKY) < ?
 	` + filterClause + `
@@ -289,17 +251,10 @@ func (r *SupplyRepository) GetLowStockVisible(threshold int, page, pageSize int,
 
 	supplies := []Supply{}
 	for rows.Next() {
-		var s Supply
-		if err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
-			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
-			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
-			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
-		); err != nil {
+		s, err := scanSupply(rows)
+		if err != nil {
 			return nil, 0, fmt.Errorf("error scanning supply: %w", err)
 		}
-
-		s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
 		supplies = append(supplies, s)
 	}
 
@@ -312,9 +267,7 @@ func (r *SupplyRepository) GetForecastCatalogVisible(keyword string, visibleIDX1
 
 	query := `
 		SELECT
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
-			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
-			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
+			` + supplySelectColumns + `
 		FROM supplies
 		WHERE (TONDAUKY != 0 OR NHAPTRONGKY != 0 OR XUATTRONGKY != 0 OR TONGNHAP != 0)
 	`
@@ -336,17 +289,10 @@ func (r *SupplyRepository) GetForecastCatalogVisible(keyword string, visibleIDX1
 
 	supplies := []Supply{}
 	for rows.Next() {
-		var s Supply
-		if err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
-			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
-			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
-			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
-		); err != nil {
+		s, err := scanSupply(rows)
+		if err != nil {
 			return nil, fmt.Errorf("error scanning supply: %w", err)
 		}
-
-		s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
 		supplies = append(supplies, s)
 	}
 

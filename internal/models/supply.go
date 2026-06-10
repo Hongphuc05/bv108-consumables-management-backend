@@ -28,6 +28,7 @@ type Supply struct {
 	NhapTrongKy  sql.NullInt32   `json:"nhapTrongKy"`
 	XuatTrongKy  sql.NullInt32   `json:"xuatTrongKy"`
 	TongNhap     sql.NullInt32   `json:"tongNhap"`
+	TonKhoMin    sql.NullInt32   `json:"tonKhoMin"`
 	// Calculated field
 	TonCuoiKy int `json:"tonCuoiKy"`
 }
@@ -156,6 +157,30 @@ type SupplyUpsertInput struct {
 	NhapTrongKy      int
 	XuatTrongKy      int
 	TongNhap         int
+	TonKhoMin        int
+}
+
+const supplySelectColumns = `
+	IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
+	THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
+	PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP, TON_KHO_MIN
+`
+
+func scanSupply(scanner interface {
+	Scan(dest ...interface{}) error
+}) (Supply, error) {
+	var s Supply
+	err := scanner.Scan(
+		&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
+		&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
+		&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
+		&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap, &s.TonKhoMin,
+	)
+	if err != nil {
+		return Supply{}, err
+	}
+	s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
+	return s, nil
 }
 
 // NewSupplyRepository creates a new supply repository
@@ -179,9 +204,7 @@ func (r *SupplyRepository) GetAll(page, pageSize int) ([]Supply, int, error) {
 	// Get paginated data
 	query := `
 		SELECT 
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
-			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
-			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
+			` + supplySelectColumns + `
 		FROM supplies
 		ORDER BY IDX1
 		LIMIT ? OFFSET ?
@@ -195,18 +218,10 @@ func (r *SupplyRepository) GetAll(page, pageSize int) ([]Supply, int, error) {
 
 	supplies := []Supply{}
 	for rows.Next() {
-		var s Supply
-		err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
-			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
-			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
-			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
-		)
+		s, err := scanSupply(rows)
 		if err != nil {
 			return nil, 0, fmt.Errorf("error scanning supply: %w", err)
 		}
-
-		s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
 		supplies = append(supplies, s)
 	}
 
@@ -217,20 +232,12 @@ func (r *SupplyRepository) GetAll(page, pageSize int) ([]Supply, int, error) {
 func (r *SupplyRepository) GetByID(idx1 int) (*Supply, error) {
 	query := `
 		SELECT 
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
-			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
-			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
+			` + supplySelectColumns + `
 		FROM supplies
 		WHERE IDX1 = ?
 	`
 
-	var s Supply
-	err := r.DB.QueryRow(query, idx1).Scan(
-		&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
-		&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
-		&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
-		&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
-	)
+	s, err := scanSupply(r.DB.QueryRow(query, idx1))
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("supply not found")
@@ -238,8 +245,6 @@ func (r *SupplyRepository) GetByID(idx1 int) (*Supply, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error querying supply: %w", err)
 	}
-
-	s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
 
 	return &s, nil
 }
@@ -260,9 +265,7 @@ func (r *SupplyRepository) SearchByName(keyword string, page, pageSize int) ([]S
 	// Get paginated data
 	query := `
 		SELECT 
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
-			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
-			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
+			` + supplySelectColumns + `
 		FROM supplies
 		WHERE NAME LIKE ? OR ID LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?
 		ORDER BY IDX1
@@ -277,18 +280,10 @@ func (r *SupplyRepository) SearchByName(keyword string, page, pageSize int) ([]S
 
 	supplies := []Supply{}
 	for rows.Next() {
-		var s Supply
-		err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
-			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
-			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
-			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
-		)
+		s, err := scanSupply(rows)
 		if err != nil {
 			return nil, 0, fmt.Errorf("error scanning supply: %w", err)
 		}
-
-		s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
 		supplies = append(supplies, s)
 	}
 
@@ -310,9 +305,7 @@ func (r *SupplyRepository) GetByGroup(groupName string, page, pageSize int) ([]S
 	// Get paginated data
 	query := `
 		SELECT 
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
-			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
-			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
+			` + supplySelectColumns + `
 		FROM supplies
 		WHERE GROUPNAME = ?
 		ORDER BY IDX1
@@ -327,18 +320,10 @@ func (r *SupplyRepository) GetByGroup(groupName string, page, pageSize int) ([]S
 
 	supplies := []Supply{}
 	for rows.Next() {
-		var s Supply
-		err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
-			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
-			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
-			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
-		)
+		s, err := scanSupply(rows)
 		if err != nil {
 			return nil, 0, fmt.Errorf("error scanning supply: %w", err)
 		}
-
-		s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
 		supplies = append(supplies, s)
 	}
 
@@ -384,9 +369,7 @@ func (r *SupplyRepository) GetLowStock(threshold int, page, pageSize int) ([]Sup
 
 	query := `
 		SELECT 
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
-			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
-			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
+			` + supplySelectColumns + `
 		FROM supplies
 		WHERE (TONDAUKY + NHAPTRONGKY - XUATTRONGKY) < ?
 		ORDER BY (TONDAUKY + NHAPTRONGKY - XUATTRONGKY) ASC
@@ -401,18 +384,10 @@ func (r *SupplyRepository) GetLowStock(threshold int, page, pageSize int) ([]Sup
 
 	supplies := []Supply{}
 	for rows.Next() {
-		var s Supply
-		err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
-			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
-			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
-			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
-		)
+		s, err := scanSupply(rows)
 		if err != nil {
 			return nil, 0, fmt.Errorf("error scanning supply: %w", err)
 		}
-
-		s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
 		supplies = append(supplies, s)
 	}
 
@@ -625,9 +600,7 @@ func (r *SupplyRepository) GetForecastCatalog(keyword string) ([]Supply, error) 
 
 	query := `
 		SELECT 
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
-			THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
-			PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP
+			` + supplySelectColumns + `
 		FROM supplies
 		WHERE (TONDAUKY != 0 OR NHAPTRONGKY != 0 OR XUATTRONGKY != 0 OR TONGNHAP != 0)
 	`
@@ -648,18 +621,10 @@ func (r *SupplyRepository) GetForecastCatalog(keyword string) ([]Supply, error) 
 
 	supplies := []Supply{}
 	for rows.Next() {
-		var s Supply
-		err := rows.Scan(
-			&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
-			&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
-			&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
-			&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap,
-		)
+		s, err := scanSupply(rows)
 		if err != nil {
 			return nil, fmt.Errorf("error scanning supply: %w", err)
 		}
-
-		s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
 		supplies = append(supplies, s)
 	}
 
@@ -694,8 +659,8 @@ func (r *SupplyRepository) ReplaceAll(inputs []SupplyUpsertInput) error {
 			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT,
 			QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, THONG_TIN_THAU, TONGTHAU,
 			HANGSX, NUOC_SX, NHA_CUNG_CAP, PRICE, TONDAUKY, NHAPTRONGKY,
-			XUATTRONGKY, TONGNHAP
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			XUATTRONGKY, TONGNHAP, TON_KHO_MIN
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	stmt, err := tx.Prepare(insertSQL)
@@ -727,6 +692,7 @@ func (r *SupplyRepository) ReplaceAll(inputs []SupplyUpsertInput) error {
 			input.NhapTrongKy,
 			input.XuatTrongKy,
 			input.TongNhap,
+			input.TonKhoMin,
 		); err != nil {
 			return fmt.Errorf("error inserting refreshed supply %q: %w", input.ID, err)
 		}

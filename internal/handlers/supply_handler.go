@@ -66,6 +66,10 @@ func (h *SupplyHandler) getVisibleSupplyIDX1ForRequester(c *gin.Context) ([]int,
 		return nil, true
 	}
 
+	if !shouldRestrictSupplyVisibilityByAssignment(currentUser.Role) {
+		return nil, true
+	}
+
 	visibleIDX1, err := h.taskRepo.GetAssignedSupplyIDX1ByUserID(currentUser.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
@@ -76,6 +80,15 @@ func (h *SupplyHandler) getVisibleSupplyIDX1ForRequester(c *gin.Context) ([]int,
 	}
 
 	return visibleIDX1, true
+}
+
+func shouldRestrictSupplyVisibilityByAssignment(role string) bool {
+	switch normalizeRoleForPermissions(role) {
+	case RoleNhanVienKho, RoleNhanVienThau:
+		return true
+	default:
+		return false
+	}
 }
 
 // PaginationResponse represents a paginated response
