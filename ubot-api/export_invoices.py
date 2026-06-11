@@ -274,7 +274,7 @@ if __name__ == "__main__":
     # Cấu hình
     USERNAME = "trangbibh@benhvien108.vn"
     PASSWORD = "Bv108@123"
-    IS_PRODUCTION = False  # Fasle là môi trường dev, true là môi trường thật
+    IS_PRODUCTION = True  # Fasle là môi trường dev, true là môi trường thật
     
     print("Chọn chế độ export (chỉ lấy 3 ngày gần nhất):")
     print("1. Lấy 100 dòng dữ liệu đầu tiên (test nhanh)")

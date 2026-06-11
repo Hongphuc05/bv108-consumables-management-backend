@@ -160,34 +160,94 @@ func (r *SupplyTaskRepository) GetAssignedSupplyDetailsByUserID(userID int64) ([
 }
 
 func (r *SupplyTaskRepository) ReplaceAssignmentsForUser(userID int64, supplyIDX1List []int, assignedByUserID int64) error {
+	oldIDs, err := r.GetAssignedSupplyIDX1ByUserID(userID)
+	if err != nil {
+		return fmt.Errorf("error getting current assignments: %w", err)
+	}
+
+	oldMap := make(map[int]bool, len(oldIDs))
+	for _, id := range oldIDs {
+		oldMap[id] = true
+	}
+
+	newMap := make(map[int]bool, len(supplyIDX1List))
+	for _, id := range supplyIDX1List {
+		newMap[id] = true
+	}
+
+	var toAdd []int
+	for _, id := range supplyIDX1List {
+		if !oldMap[id] {
+			toAdd = append(toAdd, id)
+		}
+	}
+
+	var toDelete []int
+	for _, id := range oldIDs {
+		if !newMap[id] {
+			toDelete = append(toDelete, id)
+		}
+	}
+
+	if len(toAdd) == 0 && len(toDelete) == 0 {
+		return nil
+	}
+
 	tx, err := r.DB.Begin()
 	if err != nil {
 		return fmt.Errorf("error beginning assignment transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`DELETE FROM supply_user_assignments WHERE user_id = ?`, userID); err != nil {
-		return fmt.Errorf("error clearing old assignments: %w", err)
-	}
+	const batchSize = 500
 
-	if len(supplyIDX1List) > 0 {
-		stmt, err := tx.Prepare(`
-			INSERT INTO supply_user_assignments (user_id, supply_idx1, assigned_by_user_id)
-			VALUES (?, ?, ?)
-		`)
-		if err != nil {
-			return fmt.Errorf("error preparing insert assignment statement: %w", err)
-		}
+	if len(toDelete) > 0 {
+		for i := 0; i < len(toDelete); i += batchSize {
+			end := i + batchSize
+			if end > len(toDelete) {
+				end = len(toDelete)
+			}
+			batch := toDelete[i:end]
 
-		for _, idx1 := range supplyIDX1List {
-			if _, err := stmt.Exec(userID, idx1, assignedByUserID); err != nil {
-				stmt.Close()
-				return fmt.Errorf("error inserting assignment: %w", err)
+			placeholders := strings.TrimRight(strings.Repeat("?,", len(batch)), ",")
+			query := fmt.Sprintf("DELETE FROM supply_user_assignments WHERE user_id = ? AND supply_idx1 IN (%s)", placeholders)
+
+			args := make([]interface{}, 0, 1+len(batch))
+			args = append(args, userID)
+			for _, id := range batch {
+				args = append(args, id)
+			}
+
+			if _, err := tx.Exec(query, args...); err != nil {
+				return fmt.Errorf("error deleting batch: %w", err)
 			}
 		}
+	}
 
-		if err := stmt.Close(); err != nil {
-			return fmt.Errorf("error closing assignment statement: %w", err)
+	if len(toAdd) > 0 {
+		for i := 0; i < len(toAdd); i += batchSize {
+			end := i + batchSize
+			if end > len(toAdd) {
+				end = len(toAdd)
+			}
+			batch := toAdd[i:end]
+
+			valuePlaceholders := make([]string, len(batch))
+			args := make([]interface{}, 0, len(batch)*3)
+
+			for idx, id := range batch {
+				valuePlaceholders[idx] = "(?, ?, ?)"
+				args = append(args, userID, id, assignedByUserID)
+			}
+
+			query := fmt.Sprintf(
+				"INSERT INTO supply_user_assignments (user_id, supply_idx1, assigned_by_user_id) VALUES %s",
+				strings.Join(valuePlaceholders, ","),
+			)
+
+			if _, err := tx.Exec(query, args...); err != nil {
+				return fmt.Errorf("error inserting batch: %w", err)
+			}
 		}
 	}
 

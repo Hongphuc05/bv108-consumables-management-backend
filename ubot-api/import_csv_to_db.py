@@ -1,4 +1,4 @@
-﻿"""
+"""
 Script import dá»¯ liá»‡u tá»« CSV vÃ o báº£ng hoa_don trong MySQL database
 """
 
@@ -210,8 +210,8 @@ def import_csv_to_database(csv_file='invoices_export.csv', clear_existing=True):
             update_contact_sql = """
                 UPDATE hoa_don hd
                 JOIN company_contacts cc
-                  ON hd.cong_ty = cc.company_name
-                SET hd.company_contact_id = cc.id
+                  ON LOWER(TRIM(hd.cong_ty)) = LOWER(TRIM(cc.ten_cong_ty))
+                SET hd.company_contact_id = cc.ma_so_thue
             """
             cursor.execute(update_contact_sql)
             print(f"   - company_contact_id updated rows: {cursor.rowcount}")

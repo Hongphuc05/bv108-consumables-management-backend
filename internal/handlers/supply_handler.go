@@ -84,7 +84,7 @@ func (h *SupplyHandler) getVisibleSupplyIDX1ForRequester(c *gin.Context) ([]int,
 
 func shouldRestrictSupplyVisibilityByAssignment(role string) bool {
 	switch normalizeRoleForPermissions(role) {
-	case RoleNhanVienKho, RoleNhanVienThau:
+	case RoleNhanVienKho, RoleNhanVienThau, RoleThuKho:
 		return true
 	default:
 		return false

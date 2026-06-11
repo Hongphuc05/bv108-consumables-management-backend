@@ -1,4 +1,4 @@
-﻿"""
+"""
 Auto-export script - Tự động lấy TẤT CẢ hóa đơn 3 ngày gần nhất
 Dùng để gọi từ backend API
 """
@@ -7,7 +7,7 @@ import sys
 
 USERNAME = "trangbibh@benhvien108.vn"
 PASSWORD = "Bv108@123"
-IS_PRODUCTION = False
+IS_PRODUCTION = True
 
 try:
     print("[AUTO_EXPORT] Starting invoice crawl for last 3 days...")
