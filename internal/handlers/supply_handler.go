@@ -21,7 +21,7 @@ type SupplyHandler struct {
 const (
 	defaultPage     = 1
 	defaultPageSize = 20
-	maxPageSize     = 1000
+	maxPageSize     = 10000
 )
 
 // NewSupplyHandler creates a new supply handler
