@@ -827,11 +827,13 @@ func (h *OrderHandler) sendPlacedOrderEmails(orders []models.PendingOrder) error
 		}
 
 		group.items = append(group.items, services.OrderEmailItem{
-			Index:     len(group.items) + 1,
-			TenVatTu:  strings.TrimSpace(order.TenVtytBv),
-			MaVatTu:   strings.TrimSpace(order.MaVtytCu),
-			DonViTinh: strings.TrimSpace(order.DonViTinh),
-			SoLuong:   order.DotGoiHang,
+			Index:        len(group.items) + 1,
+			TenVatTu:     strings.TrimSpace(order.TenVtytBv),
+			MaXuatHoaDon: strings.TrimSpace(order.MaVtytCu),
+			MaHieu:       strings.TrimSpace(order.MaHieu),
+			HangNuocSX:   strings.TrimSpace(order.HangSx),
+			DonViTinh:    strings.TrimSpace(order.DonViTinh),
+			SoLuong:      order.DotGoiHang,
 		})
 		groups[key] = group
 	}

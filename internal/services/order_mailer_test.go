@@ -8,12 +8,12 @@ import (
 )
 
 func TestRenderPlacedOrderEmailBody(t *testing.T) {
-	body, err := renderPlacedOrderEmailBody()
+	body, err := renderPlacedOrderEmailBody("Công ty ABC")
 	if err != nil {
 		t.Fatalf("renderPlacedOrderEmailBody() error = %v", err)
 	}
 
-	expected := "Khoa trang bị bênh viên quân đội TW 108 đặt hàng quý công ty theo nội dung đính kèm sau:\npdf đính kèm"
+	expected := "Kính gửi công ty Công ty ABC, Khoa Trang bị- BV TWQĐ 108 xin gửi đến Quý công ty đơn đặt hàng vật tư theo file PDF đính kèm"
 	if body != expected {
 		t.Fatalf("unexpected email body: %q", body)
 	}
@@ -30,20 +30,26 @@ func TestRenderPlacedOrderAttachmentPDF(t *testing.T) {
 		CurrentDate:  "05/04/2026",
 		ContactName:  "Nguyễn Thành Trung",
 		ContactDept:  "Khoa Trang bị",
+		ContactTitle: "PCNK Trang bị",
+		ContactPhone: "0988335388",
 		Items: []OrderEmailItem{
 			{
-				Index:     1,
-				TenVatTu:  "Bơm kim tiêm",
-				MaVatTu:   "VT001",
-				DonViTinh: "Cái",
-				SoLuong:   25,
+				Index:        1,
+				TenVatTu:     "Bơm kim tiêm",
+				MaXuatHoaDon: "VT001",
+				MaHieu:       "MH001",
+				HangNuocSX:   "Hãng A / Việt Nam",
+				DonViTinh:    "Cái",
+				SoLuong:      25,
 			},
 			{
-				Index:     2,
-				TenVatTu:  "Dây truyền dịch",
-				MaVatTu:   "VT002",
-				DonViTinh: "Bộ",
-				SoLuong:   10,
+				Index:        2,
+				TenVatTu:     "Dây truyền dịch",
+				MaXuatHoaDon: "VT002",
+				MaHieu:       "MH002",
+				HangNuocSX:   "Hãng B / Đức",
+				DonViTinh:    "Bộ",
+				SoLuong:      10,
 			},
 		},
 	})

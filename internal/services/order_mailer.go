@@ -20,12 +20,14 @@ type OrderEmailSender interface {
 }
 
 type OrderEmailItem struct {
-	Index       int
-	TenVatTu    string
-	MaVatTu     string
-	DonViTinh   string
-	SoLuong     int
-	DotGiaoHang string
+	Index        int
+	TenVatTu     string
+	MaXuatHoaDon string
+	MaHieu       string
+	HangNuocSX   string
+	DonViTinh    string
+	SoLuong      int
+	DotGiaoHang  string
 }
 
 type SMTPOrderMailer struct {
@@ -47,8 +49,8 @@ func NewSMTPOrderMailer(host, port, username, appPassword, from string) *SMTPOrd
 }
 
 const (
-	placedOrderEmailSubject   = "ĐƠN ĐẶT HÀNG VẬT TƯ TẠI BỆNH VIỆN QUÂN ĐỘI TW 108"
-	placedOrderEmailBody      = "Khoa trang bị bênh viên quân đội TW 108 đặt hàng quý công ty theo nội dung đính kèm sau:\npdf đính kèm"
+	placedOrderEmailSubject   = "ĐƠN ĐẶT HÀNG VẬT TƯ TẠI BỆNH VIỆN TWQĐ 108"
+	placedOrderEmailBody      = "Kính gửi công ty [Tên công ty cung cấp], Khoa Trang bị- BV TWQĐ 108 xin gửi đến Quý công ty đơn đặt hàng vật tư theo file PDF đính kèm"
 	placedOrderAttachmentName = "don-dat-hang-vat-tu-bv108.pdf"
 	placedOrderPDFContentType = gomail.ContentType("application/pdf")
 	orderPDFFontFamily        = "orderpdf"
@@ -126,6 +128,8 @@ func (m *SMTPOrderMailer) SendPlacedOrderEmail(recipientEmail, supplierName stri
 		CurrentDate:  currentOrderDate(),
 		ContactName:  "Nguyễn Thành Trung",
 		ContactDept:  "Khoa Trang bị",
+		ContactTitle: "PCNK Trang bị",
+		ContactPhone: "0988335388",
 		Items:        items,
 	}
 
@@ -134,7 +138,7 @@ func (m *SMTPOrderMailer) SendPlacedOrderEmail(recipientEmail, supplierName stri
 		return fmt.Errorf("error rendering order PDF attachment: %w", err)
 	}
 
-	body, err := renderPlacedOrderEmailBody()
+	body, err := renderPlacedOrderEmailBody(supplierName)
 	if err != nil {
 		return fmt.Errorf("error rendering email body: %w", err)
 	}
@@ -164,11 +168,18 @@ type placedOrderDocumentData struct {
 	CurrentDate  string
 	ContactName  string
 	ContactDept  string
+	ContactTitle string
+	ContactPhone string
 	Items        []OrderEmailItem
 }
 
-func renderPlacedOrderEmailBody() (string, error) {
-	return placedOrderEmailBody, nil
+func renderPlacedOrderEmailBody(companyName string) (string, error) {
+	companyName = strings.TrimSpace(companyName)
+	if companyName == "" {
+		companyName = "Quý công ty"
+	}
+
+	return strings.Replace(placedOrderEmailBody, "[Tên công ty cung cấp]", companyName, 1), nil
 }
 
 func renderPlacedOrderAttachmentPDF(data placedOrderDocumentData) ([]byte, error) {
@@ -214,19 +225,30 @@ func renderPlacedOrderPDFHeader(pdf *gofpdf.Fpdf, data placedOrderDocumentData) 
 	pageWidth, _ := pdf.GetPageSize()
 	leftMargin, _, rightMargin, _ := pdf.GetMargins()
 	contentWidth := pageWidth - leftMargin - rightMargin
-	leftWidth := contentWidth * 0.45
+	leftWidth := contentWidth * 0.4
 	rightWidth := contentWidth - leftWidth
 
 	pdf.SetFont(orderPDFFontFamily, "B", orderPDFBodyFontSize)
+	topY := pdf.GetY()
+	rowHeight := 8.0
+	pdf.Rect(leftMargin, topY, leftWidth, rowHeight, "")
+	pdf.Rect(leftMargin+leftWidth, topY, rightWidth, rowHeight, "")
+	pdf.SetXY(leftMargin, topY+1)
 	pdf.CellFormat(leftWidth, 6, "BỆNH VIỆN TWQĐ 108", "", 0, "C", false, 0, "")
+	pdf.SetXY(leftMargin+leftWidth, topY+1)
 	pdf.CellFormat(rightWidth, 6, "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", "", 1, "C", false, 0, "")
+
+	secondRowY := topY + rowHeight
+	pdf.Rect(leftMargin, secondRowY, leftWidth, rowHeight, "")
+	pdf.Rect(leftMargin+leftWidth, secondRowY, rightWidth, rowHeight, "")
+	pdf.SetXY(leftMargin, secondRowY+1)
 	pdf.CellFormat(leftWidth, 6, "KHOA TRANG BỊ", "", 0, "C", false, 0, "")
-	pdf.SetFont(orderPDFFontFamily, "", orderPDFBodyFontSize)
+	pdf.SetXY(leftMargin+leftWidth, secondRowY+1)
 	pdf.CellFormat(rightWidth, 6, "Độc lập - Tự do - Hạnh phúc", "", 1, "C", false, 0, "")
 	pdf.Ln(orderPDFSectionSpacing + 2)
 
 	pdf.SetFont(orderPDFFontFamily, "B", orderPDFBodyFontSize)
-	pdf.CellFormat(0, 8, placedOrderEmailSubject, "", 1, "C", false, 0, "")
+	pdf.CellFormat(0, 8, "ĐƠN ĐẶT HÀNG VẬT TƯ", "", 1, "C", false, 0, "")
 	pdf.Ln(orderPDFParagraphSpacing)
 
 	pdf.SetFont(orderPDFFontFamily, "", orderPDFBodyFontSize)
@@ -234,7 +256,7 @@ func renderPlacedOrderPDFHeader(pdf *gofpdf.Fpdf, data placedOrderDocumentData) 
 	if data.CompanyName == "" {
 		pdf.MultiCell(0, orderPDFBodyLineHeight, "Kính gửi Quý công ty,", "", "L", false)
 	} else {
-		pdf.Write(orderPDFBodyLineHeight, "Kính gửi Quý công ty ")
+		pdf.Write(orderPDFBodyLineHeight, "Kính gửi công ty ")
 		pdf.SetFont(orderPDFFontFamily, "B", orderPDFBodyFontSize)
 		pdf.Write(orderPDFBodyLineHeight, data.CompanyName)
 		pdf.SetFont(orderPDFFontFamily, "", orderPDFBodyFontSize)
@@ -242,7 +264,7 @@ func renderPlacedOrderPDFHeader(pdf *gofpdf.Fpdf, data placedOrderDocumentData) 
 		pdf.Ln(orderPDFBodyLineHeight)
 	}
 	pdf.Ln(orderPDFParagraphSpacing)
-	pdf.MultiCell(0, orderPDFBodyLineHeight, fmt.Sprintf("Khoa Trang bị- BV Quân đội TW 108 xin gửi đến Quý công ty đơn đặt hàng vật tư tháng %s như sau:", data.CurrentMonth), "", "L", false)
+	pdf.MultiCell(0, orderPDFBodyLineHeight, "Khoa Trang bị - Bệnh viện TWQĐ 108 xin gửi đến Quý công ty đơn đặt hàng vật tư như sau:", "", "L", false)
 	pdf.Ln(orderPDFParagraphSpacing)
 }
 
@@ -250,7 +272,7 @@ func renderPlacedOrderPDFTable(pdf *gofpdf.Fpdf, items []OrderEmailItem) {
 	leftMargin, _, _, _ := pdf.GetMargins()
 	_, pageHeight := pdf.GetPageSize()
 	bottomMargin := 15.0
-	tableWidths := []float64{12, 78, 28, 26, 36}
+	tableWidths := []float64{12, 36, 23, 22, 44, 21, 17}
 	lineHeight := 5.5
 	cellPadding := 1.2
 
@@ -259,19 +281,19 @@ func renderPlacedOrderPDFTable(pdf *gofpdf.Fpdf, items []OrderEmailItem) {
 	pdf.Ln(orderPDFParagraphSpacing - 1)
 
 	drawTableHeader := func() {
-		drawValues := []string{"STT", "Tên vật tư", "Mã vật tư", "Đơn vị tính", "Số lượng"}
+		drawValues := []string{"STT", "Tên vật tư", "Mã xuất\nhóa đơn", "Mã hiệu", "Hãng/ Nước\nsản xuất", "Đơn vị\ntính", "Số\nlượng"}
 		pdf.SetFont(orderPDFFontFamily, "B", orderPDFTableFontSize)
 		x := leftMargin
 		y := pdf.GetY()
 		for index, value := range drawValues {
 			width := tableWidths[index]
-			pdf.Rect(x, y, width, 8, "")
+			pdf.Rect(x, y, width, 12, "")
 			pdf.SetXY(x+cellPadding, y+cellPadding)
-			pdf.MultiCell(width-(cellPadding*2), 5.5, value, "", "C", false)
+			pdf.MultiCell(width-(cellPadding*2), 5.0, value, "", "L", false)
 			x += width
 			pdf.SetXY(x, y)
 		}
-		pdf.SetXY(leftMargin, y+8)
+		pdf.SetXY(leftMargin, y+12)
 	}
 
 	drawRow := func(values []string, bold bool) {
@@ -302,7 +324,7 @@ func renderPlacedOrderPDFTable(pdf *gofpdf.Fpdf, items []OrderEmailItem) {
 
 		x := leftMargin
 		y := pdf.GetY()
-		alignments := []string{"C", "C", "C", "C", "C"}
+		alignments := []string{"L", "L", "L", "L", "L", "L", "L"}
 
 		for index, value := range values {
 			width := tableWidths[index]
@@ -322,14 +344,16 @@ func renderPlacedOrderPDFTable(pdf *gofpdf.Fpdf, items []OrderEmailItem) {
 		drawRow([]string{
 			strconv.Itoa(item.Index),
 			nonEmptyPDFText(item.TenVatTu),
-			nonEmptyPDFText(item.MaVatTu),
+			nonEmptyPDFText(item.MaXuatHoaDon),
+			nonEmptyPDFText(item.MaHieu),
+			nonEmptyPDFText(item.HangNuocSX),
 			nonEmptyPDFText(item.DonViTinh),
 			strconv.Itoa(item.SoLuong),
 		}, false)
 	}
 
 	if len(items) == 0 {
-		drawRow([]string{"1", "...", "...", "...", "..."}, false)
+		drawRow([]string{"1", "...", "...", "...", "...", "...", "..."}, false)
 	}
 
 	pdf.Ln(orderPDFSectionSpacing - 1)
@@ -337,16 +361,19 @@ func renderPlacedOrderPDFTable(pdf *gofpdf.Fpdf, items []OrderEmailItem) {
 
 func renderPlacedOrderPDFFooter(pdf *gofpdf.Fpdf, data placedOrderDocumentData) {
 	pdf.SetFont(orderPDFFontFamily, "B", orderPDFBodyFontSize)
-	pdf.MultiCell(0, orderPDFBodyLineHeight, fmt.Sprintf("2. Thông tin liên hệ: %s – %s", data.ContactName, data.ContactDept), "", "L", false)
+	pdf.Write(orderPDFBodyLineHeight, "2. Thông tin liên hệ:")
+	pdf.SetFont(orderPDFFontFamily, "", orderPDFBodyFontSize)
+	pdf.Write(orderPDFBodyLineHeight, fmt.Sprintf(" %s - %s ( SĐT liên hệ:%s)", data.ContactName, data.ContactTitle, data.ContactPhone))
+	pdf.Ln(orderPDFBodyLineHeight)
 	pdf.Ln(orderPDFParagraphSpacing)
 
 	pdf.SetFont(orderPDFFontFamily, "", orderPDFBodyFontSize)
-	pdf.MultiCell(0, orderPDFBodyLineHeight, "Kính mong Quý công ty xác nhận lại đơn hàng, và tiến hành giao hàng theo đúng đợt giao hàng đã nêu. Trân trọng cảm ơn sự hợp tác của Quý công ty!", "", "L", false)
+	pdf.MultiCell(0, orderPDFBodyLineHeight, "Yêu cầu công ty xác nhận lại đơn hàng qua gmail và zalo của cán bộ phụ trách gói thầu trong vòng 1 giờ sau khi tiếp nhận đơn hàng, và tiến hành giao hàng theo đúng đợt giao hàng đã nêu.", "", "C", false)
 	pdf.Ln(orderPDFSectionSpacing)
-	pdf.CellFormat(0, orderPDFBodyLineHeight, "Trân trọng,", "", 1, "L", false, 0, "")
-	pdf.Ln(orderPDFParagraphSpacing - 1)
+	pdf.CellFormat(0, orderPDFBodyLineHeight, "Trân trọng cảm ơn sự hợp tác của công ty!", "", 1, "C", false, 0, "")
+	pdf.Ln(orderPDFParagraphSpacing)
 	pdf.SetFont(orderPDFFontFamily, "B", orderPDFBodyFontSize)
-	pdf.CellFormat(0, orderPDFBodyLineHeight, fmt.Sprintf("%s – %s.", data.ContactName, data.ContactDept), "", 1, "R", false, 0, "")
+	pdf.CellFormat(0, orderPDFBodyLineHeight, fmt.Sprintf("%s – %s", data.ContactName, data.ContactDept), "", 1, "R", false, 0, "")
 }
 
 func resolveOrderPDFFontPaths() (string, string, error) {

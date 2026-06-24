@@ -15,6 +15,7 @@ const (
 	ForecastApprovalStatusRejected  = "rejected"
 	ForecastApprovalStatusEdited    = "edited"
 	ForecastApprovalStatusSubmitted = "submitted"
+	forecastApprovalMaxRetries      = 3
 )
 
 type ForecastApprovalRecord struct {
@@ -168,11 +169,11 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
 			ma_vtyt_cu VARCHAR(255) NOT NULL,
 			ten_vtyt_bv VARCHAR(500) NOT NULL,
-			ma_hieu VARCHAR(255) NOT NULL DEFAULT '',
-			hang_sx VARCHAR(255) NOT NULL DEFAULT '',
-			nha_thau VARCHAR(500) NOT NULL DEFAULT '',
-			type_name VARCHAR(255) NOT NULL DEFAULT '',
-			quy_cach VARCHAR(500) NOT NULL DEFAULT '',
+			ma_hieu VARCHAR(1024) NOT NULL DEFAULT '',
+			hang_sx VARCHAR(512) NOT NULL DEFAULT '',
+			nha_thau VARCHAR(1000) NOT NULL DEFAULT '',
+			type_name VARCHAR(512) NOT NULL DEFAULT '',
+			quy_cach VARCHAR(1000) NOT NULL DEFAULT '',
 			don_vi_tinh VARCHAR(100) NOT NULL DEFAULT '',
 			don_gia DECIMAL(18,2) NOT NULL DEFAULT 0,
 			sl_xuat INT NOT NULL DEFAULT 0,
@@ -201,6 +202,10 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 		return fmt.Errorf("error ensuring forecast monthly snapshot schema: %w", err)
 	}
 
+	if err := r.ensureMonthlySnapshotColumnSizes(); err != nil {
+		return err
+	}
+
 	needsBackfill, err := r.NeedsMonthlySnapshotBackfill()
 	if err != nil {
 		return err
@@ -212,6 +217,74 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 	}
 
 	return nil
+}
+
+func (r *ForecastApprovalRepository) ensureMonthlySnapshotColumnSizes() error {
+	type columnResize struct {
+		columnName     string
+		expectedType   string
+		alterStatement string
+	}
+
+	changes := []columnResize{
+		{
+			columnName:     "ma_hieu",
+			expectedType:   "varchar(1024)",
+			alterStatement: "ALTER TABLE forecast_monthly_snapshots MODIFY COLUMN ma_hieu VARCHAR(1024) NOT NULL DEFAULT ''",
+		},
+		{
+			columnName:     "hang_sx",
+			expectedType:   "varchar(512)",
+			alterStatement: "ALTER TABLE forecast_monthly_snapshots MODIFY COLUMN hang_sx VARCHAR(512) NOT NULL DEFAULT ''",
+		},
+		{
+			columnName:     "nha_thau",
+			expectedType:   "varchar(1000)",
+			alterStatement: "ALTER TABLE forecast_monthly_snapshots MODIFY COLUMN nha_thau VARCHAR(1000) NOT NULL DEFAULT ''",
+		},
+		{
+			columnName:     "type_name",
+			expectedType:   "varchar(512)",
+			alterStatement: "ALTER TABLE forecast_monthly_snapshots MODIFY COLUMN type_name VARCHAR(512) NOT NULL DEFAULT ''",
+		},
+		{
+			columnName:     "quy_cach",
+			expectedType:   "varchar(1000)",
+			alterStatement: "ALTER TABLE forecast_monthly_snapshots MODIFY COLUMN quy_cach VARCHAR(1000) NOT NULL DEFAULT ''",
+		},
+	}
+
+	for _, change := range changes {
+		currentType, err := r.getColumnType("forecast_monthly_snapshots", change.columnName)
+		if err != nil {
+			return err
+		}
+		if currentType == "" || strings.EqualFold(currentType, change.expectedType) {
+			continue
+		}
+		if _, err := r.DB.Exec(change.alterStatement); err != nil {
+			return fmt.Errorf("error resizing forecast_monthly_snapshots.%s: %w", change.columnName, err)
+		}
+	}
+
+	return nil
+}
+
+func (r *ForecastApprovalRepository) getColumnType(tableName, columnName string) (string, error) {
+	var dataType string
+	if err := r.DB.QueryRow(`
+		SELECT LOWER(COLUMN_TYPE)
+		FROM information_schema.columns
+		WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?
+		LIMIT 1
+	`, tableName, columnName).Scan(&dataType); err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("error reading column type %s.%s: %w", tableName, columnName, err)
+	}
+
+	return strings.TrimSpace(dataType), nil
 }
 
 func (r *ForecastApprovalRepository) NeedsMonthlySnapshotBackfill() (bool, error) {
@@ -419,6 +492,42 @@ func (r *ForecastApprovalRepository) SaveApprovals(inputs []SaveForecastApproval
 		return nil
 	}
 
+	sortedInputs := append([]SaveForecastApprovalInput(nil), inputs...)
+	sort.SliceStable(sortedInputs, func(i, j int) bool {
+		left := sortedInputs[i]
+		right := sortedInputs[j]
+		if left.ForecastYear != right.ForecastYear {
+			return left.ForecastYear < right.ForecastYear
+		}
+		if left.ForecastMonth != right.ForecastMonth {
+			return left.ForecastMonth < right.ForecastMonth
+		}
+		leftCode := strings.TrimSpace(left.MaVtytCu)
+		rightCode := strings.TrimSpace(right.MaVtytCu)
+		if leftCode != rightCode {
+			return leftCode < rightCode
+		}
+		return strings.TrimSpace(left.MaQuanLy) < strings.TrimSpace(right.MaQuanLy)
+	})
+
+	var lastErr error
+	for attempt := 0; attempt < forecastApprovalMaxRetries; attempt++ {
+		err := r.saveApprovalsOnce(sortedInputs)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isMySQLDeadlockError(err) {
+			return err
+		}
+
+		time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+	}
+
+	return lastErr
+}
+
+func (r *ForecastApprovalRepository) saveApprovalsOnce(inputs []SaveForecastApprovalInput) error {
 	tx, err := r.DB.Begin()
 	if err != nil {
 		return fmt.Errorf("error starting forecast approval transaction: %w", err)
@@ -518,6 +627,15 @@ func (r *ForecastApprovalRepository) SaveApprovals(inputs []SaveForecastApproval
 	}
 
 	return nil
+}
+
+func isMySQLDeadlockError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "error 1213") || strings.Contains(message, "deadlock found when trying to get lock")
 }
 
 func (r *ForecastApprovalRepository) upsertMonthlySnapshot(tx *sql.Tx, input SaveForecastApprovalInput) error {
