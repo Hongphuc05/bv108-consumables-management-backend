@@ -230,17 +230,12 @@ func renderPlacedOrderPDFHeader(pdf *gofpdf.Fpdf, data placedOrderDocumentData) 
 
 	pdf.SetFont(orderPDFFontFamily, "B", orderPDFBodyFontSize)
 	topY := pdf.GetY()
-	rowHeight := 8.0
-	pdf.Rect(leftMargin, topY, leftWidth, rowHeight, "")
-	pdf.Rect(leftMargin+leftWidth, topY, rightWidth, rowHeight, "")
 	pdf.SetXY(leftMargin, topY+1)
 	pdf.CellFormat(leftWidth, 6, "BỆNH VIỆN TWQĐ 108", "", 0, "C", false, 0, "")
 	pdf.SetXY(leftMargin+leftWidth, topY+1)
 	pdf.CellFormat(rightWidth, 6, "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", "", 1, "C", false, 0, "")
 
-	secondRowY := topY + rowHeight
-	pdf.Rect(leftMargin, secondRowY, leftWidth, rowHeight, "")
-	pdf.Rect(leftMargin+leftWidth, secondRowY, rightWidth, rowHeight, "")
+	secondRowY := topY + 8.0
 	pdf.SetXY(leftMargin, secondRowY+1)
 	pdf.CellFormat(leftWidth, 6, "KHOA TRANG BỊ", "", 0, "C", false, 0, "")
 	pdf.SetXY(leftMargin+leftWidth, secondRowY+1)
@@ -368,12 +363,43 @@ func renderPlacedOrderPDFFooter(pdf *gofpdf.Fpdf, data placedOrderDocumentData) 
 	pdf.Ln(orderPDFParagraphSpacing)
 
 	pdf.SetFont(orderPDFFontFamily, "", orderPDFBodyFontSize)
-	pdf.MultiCell(0, orderPDFBodyLineHeight, "Yêu cầu công ty xác nhận lại đơn hàng qua gmail và zalo của cán bộ phụ trách gói thầu trong vòng 1 giờ sau khi tiếp nhận đơn hàng, và tiến hành giao hàng theo đúng đợt giao hàng đã nêu.", "", "C", false)
+	writeOrderPDFIndentedParagraph(
+		pdf,
+		"Yêu cầu công ty xác nhận lại đơn hàng qua gmail và zalo của cán bộ phụ trách gói thầu trong vòng 1 giờ sau khi tiếp nhận đơn hàng, và tiến hành giao hàng theo đúng đợt giao hàng đã nêu.",
+		8.0,
+	)
 	pdf.Ln(orderPDFSectionSpacing)
-	pdf.CellFormat(0, orderPDFBodyLineHeight, "Trân trọng cảm ơn sự hợp tác của công ty!", "", 1, "C", false, 0, "")
+	writeOrderPDFIndentedParagraph(pdf, "Trân trọng cảm ơn sự hợp tác của công ty!", 8.0)
 	pdf.Ln(orderPDFParagraphSpacing)
 	pdf.SetFont(orderPDFFontFamily, "B", orderPDFBodyFontSize)
 	pdf.CellFormat(0, orderPDFBodyLineHeight, fmt.Sprintf("%s – %s", data.ContactName, data.ContactDept), "", 1, "R", false, 0, "")
+}
+
+func writeOrderPDFIndentedParagraph(pdf *gofpdf.Fpdf, text string, indent float64) {
+	leftMargin, _, rightMargin, _ := pdf.GetMargins()
+	pageWidth, _ := pdf.GetPageSize()
+	contentWidth := pageWidth - leftMargin - rightMargin
+
+	pdf.SetX(leftMargin + indent)
+	firstLineWidth := contentWidth - indent
+	if firstLineWidth <= 0 {
+		firstLineWidth = contentWidth
+	}
+
+	lines := pdf.SplitText(text, firstLineWidth)
+	if len(lines) == 0 {
+		pdf.Ln(orderPDFBodyLineHeight)
+		return
+	}
+
+	pdf.CellFormat(firstLineWidth, orderPDFBodyLineHeight, lines[0], "", 1, "L", false, 0, "")
+	if len(lines) == 1 {
+		return
+	}
+
+	remaining := strings.TrimSpace(strings.Join(lines[1:], " "))
+	pdf.SetX(leftMargin)
+	pdf.MultiCell(contentWidth, orderPDFBodyLineHeight, remaining, "", "L", false)
 }
 
 func resolveOrderPDFFontPaths() (string, string, error) {

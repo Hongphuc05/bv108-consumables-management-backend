@@ -19,7 +19,6 @@ import (
 
 const (
 	RoleNhanVien         = "nhan_vien"
-	RoleTruongKhoa       = "truong_khoa"
 	RoleAdmin            = "admin"
 	RoleChiHuyKhoa       = "chi_huy_khoa"
 	RoleNhanVienKho      = "nhan_vien_kho"
@@ -97,10 +96,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	req.Username = strings.TrimSpace(req.Username)
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	req.Role = strings.ToLower(strings.TrimSpace(req.Role))
-
-	if req.Role == RoleTruongKhoa {
-		req.Role = RoleAdmin
-	}
 
 	if req.Username == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_USERNAME", Message: "Username is required"})
@@ -337,10 +332,6 @@ func (h *AuthHandler) UpdateManagedUserRole(c *gin.Context) {
 	}
 
 	req.Role = strings.ToLower(strings.TrimSpace(req.Role))
-	if req.Role == RoleTruongKhoa {
-		req.Role = RoleAdmin
-	}
-
 	if !isAssignableRole(req.Role) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_ROLE", Message: "Role must be one of: admin, chi_huy_khoa, nhan_vien_kho, thu_kho, nhan_vien_ke_toan, nhan_vien_thau"})
 		return
@@ -442,7 +433,7 @@ func isAssignableRole(role string) bool {
 }
 
 func isAccountCreatorRole(role string) bool {
-	return role == RoleAdmin || role == RoleTruongKhoa || role == RoleChiHuyKhoa
+	return role == RoleAdmin || role == RoleChiHuyKhoa
 }
 
 func (h *AuthHandler) ensureCanCreateUser(c *gin.Context, requestedRole string) error {

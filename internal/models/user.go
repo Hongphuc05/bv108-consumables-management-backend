@@ -159,7 +159,7 @@ func (r *UserRepository) ListOperationalUsers() ([]UserProfile, error) {
 		SELECT id, username, email, role
 		FROM users
 		WHERE is_active = 1
-		  AND LOWER(TRIM(role)) NOT IN ('admin', 'chi_huy_khoa', 'truong_khoa')
+		  AND LOWER(TRIM(role)) = 'nhan_vien_thau'
 		ORDER BY role, username, id
 	`
 

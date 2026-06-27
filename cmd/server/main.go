@@ -203,6 +203,8 @@ func main() {
 			supplyTasks.GET("/state", supplyTaskHandler.GetState)
 			supplyTasks.GET("/catalog", supplyTaskHandler.GetSupplyCatalog)
 			supplyTasks.GET("/assignments", supplyTaskHandler.GetAssignmentsByUser)
+			supplyTasks.GET("/assignments/export", supplyTaskHandler.ExportAssignments)
+			supplyTasks.POST("/assignments/import", supplyTaskHandler.ImportAssignments)
 			supplyTasks.PUT("/visibility", supplyTaskHandler.UpdateVisibility)
 			supplyTasks.PUT("/assignments", supplyTaskHandler.UpdateAssignmentsByUser)
 		}
