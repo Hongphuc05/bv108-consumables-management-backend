@@ -1,8 +1,9 @@
-﻿package handlers
+package handlers
 
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -11,19 +12,26 @@ import (
 	"strings"
 	"time"
 
+	"bv108-consumables-management-backend/internal/models"
 	"bv108-consumables-management-backend/internal/realtime"
 
 	"github.com/gin-gonic/gin"
 )
 
+const ubotAPIDirEnvKey = "UBOT_API_DIR"
+
 type RefreshHandler struct {
 	hoaDonRepo interface{ GetCount() (int, error) }
+	userRepo   *models.UserRepository
+	jwtSecret  []byte
 	hub        *realtime.Hub
 }
 
-func NewRefreshHandler(repo interface{ GetCount() (int, error) }, hub *realtime.Hub) *RefreshHandler {
+func NewRefreshHandler(repo interface{ GetCount() (int, error) }, userRepo *models.UserRepository, jwtSecret string, hub *realtime.Hub) *RefreshHandler {
 	return &RefreshHandler{
 		hoaDonRepo: repo,
+		userRepo:   userRepo,
+		jwtSecret:  []byte(jwtSecret),
 		hub:        hub,
 	}
 }
@@ -129,22 +137,99 @@ func resolvePythonRuntime(ubotDir string) (string, []string, []string) {
 	return "", nil, tried
 }
 
+type ubotDirCandidate struct {
+	label string
+	path  string
+}
+
+func resolveExistingDirectory(candidates []ubotDirCandidate) (string, []string, error) {
+	tried := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+
+	for _, candidate := range candidates {
+		trimmedPath := strings.TrimSpace(candidate.path)
+		if trimmedPath == "" {
+			continue
+		}
+
+		cleanPath := filepath.Clean(trimmedPath)
+		if _, exists := seen[cleanPath]; exists {
+			continue
+		}
+		seen[cleanPath] = struct{}{}
+		tried = append(tried, fmt.Sprintf("%s => %s", candidate.label, cleanPath))
+
+		info, err := os.Stat(cleanPath)
+		if err == nil && info.IsDir() {
+			return cleanPath, tried, nil
+		}
+	}
+
+	return "", tried, fmt.Errorf("no existing directory found")
+}
+
+func resolveUBotDir() (string, []string, error) {
+	candidates := make([]ubotDirCandidate, 0, 6)
+
+	if envPath := strings.TrimSpace(os.Getenv(ubotAPIDirEnvKey)); envPath != "" {
+		candidates = append(candidates, ubotDirCandidate{
+			label: ubotAPIDirEnvKey,
+			path:  envPath,
+		})
+	}
+
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, ubotDirCandidate{
+			label: "cwd/ubot-api",
+			path:  filepath.Join(cwd, "ubot-api"),
+		})
+	}
+
+	if executablePath, err := os.Executable(); err == nil {
+		executableDir := filepath.Dir(executablePath)
+		candidates = append(candidates,
+			ubotDirCandidate{
+				label: "exe-dir/ubot-api",
+				path:  filepath.Join(executableDir, "ubot-api"),
+			},
+			ubotDirCandidate{
+				label: "exe-parent/ubot-api",
+				path:  filepath.Join(executableDir, "..", "ubot-api"),
+			},
+		)
+	}
+
+	if _, sourceFile, _, ok := runtime.Caller(0); ok {
+		backendRoot := filepath.Join(filepath.Dir(sourceFile), "..", "..")
+		candidates = append(candidates, ubotDirCandidate{
+			label: "source-tree/ubot-api",
+			path:  filepath.Join(backendRoot, "ubot-api"),
+		})
+	}
+
+	return resolveExistingDirectory(candidates)
+}
+
 func (h *RefreshHandler) RefreshInvoices(c *gin.Context) {
-	// Lấy thư mục gốc của project từ working directory
-	projectRoot, err := os.Getwd()
+	currentUser, err := getCurrentUserFromAuthorizationHeader(c, h.userRepo, h.jwtSecret)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to get working directory",
-			"details": err.Error(),
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+	if !userHasAnyRole(currentUser, RoleAdmin, RoleChiHuyKhoa, RoleNhanVienKeToan) {
+		c.JSON(http.StatusForbidden, ErrorResponse{
+			Error:   "FORBIDDEN",
+			Message: "Only Admin, Chi huy khoa or Nhan vien ke toan can refresh invoices",
 		})
 		return
 	}
 
-	ubotDir := filepath.Join(projectRoot, "ubot-api")
-	if _, err := os.Stat(ubotDir); err != nil {
+	ubotDir, triedDirs, err := resolveUBotDir()
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "UBot script directory not found",
-			"details": fmt.Sprintf("expected path: %s", ubotDir),
+			"details": fmt.Sprintf("Set %s or start the backend from a directory layout that includes ubot-api", ubotAPIDirEnvKey),
+			"tried":   triedDirs,
 		})
 		return
 	}
@@ -164,7 +249,7 @@ func (h *RefreshHandler) RefreshInvoices(c *gin.Context) {
 	}
 
 	// Step 1: Export - Dùng auto_export.py không cần input
-	fmt.Println("🚀 Crawling invoices...")
+	log.Println("[invoice-refresh] crawling invoices")
 	exportArgs := append(append([]string{}, pythonBaseArgs...), "auto_export.py")
 	exportCmd := exec.Command(pythonCmd, exportArgs...)
 	exportCmd.Dir = ubotDir
@@ -184,7 +269,7 @@ func (h *RefreshHandler) RefreshInvoices(c *gin.Context) {
 	}
 
 	// Step 2: Import
-	fmt.Println("📥 Importing to database...")
+	log.Println("[invoice-refresh] importing invoices into database")
 	importArgs := append(append([]string{}, pythonBaseArgs...), "import_csv_to_db.py", "invoices_export.csv", "true")
 	importCmd := exec.Command(pythonCmd, importArgs...)
 	importCmd.Dir = ubotDir
@@ -212,7 +297,7 @@ func (h *RefreshHandler) RefreshInvoices(c *gin.Context) {
 		return
 	}
 
-	fmt.Println("Refresh completed successfully")
+	log.Println("[invoice-refresh] completed successfully")
 	if h.hub != nil {
 		h.hub.Broadcast("invoices.data_refreshed", gin.H{
 			"total":       total,

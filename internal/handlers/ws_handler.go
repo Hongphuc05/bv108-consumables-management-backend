@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 
@@ -14,6 +13,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const websocketAuthProtocol = "bv108.auth"
+
 type WSHandler struct {
 	userRepo  *models.UserRepository
 	jwtSecret []byte
@@ -21,7 +22,16 @@ type WSHandler struct {
 	upgrader  websocket.Upgrader
 }
 
-func NewWSHandler(userRepo *models.UserRepository, jwtSecret string, hub *realtime.Hub) *WSHandler {
+func NewWSHandler(userRepo *models.UserRepository, jwtSecret string, hub *realtime.Hub, frontendURL string) *WSHandler {
+	allowedOrigins := map[string]struct{}{
+		"http://localhost:5173": {},
+		"http://localhost:5174": {},
+		"http://localhost:3000": {},
+	}
+	if origin := strings.TrimSpace(frontendURL); origin != "" {
+		allowedOrigins[origin] = struct{}{}
+	}
+
 	return &WSHandler{
 		userRepo:  userRepo,
 		jwtSecret: []byte(jwtSecret),
@@ -29,8 +39,14 @@ func NewWSHandler(userRepo *models.UserRepository, jwtSecret string, hub *realti
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
+			Subprotocols:    []string{websocketAuthProtocol},
 			CheckOrigin: func(r *http.Request) bool {
-				return true
+				origin := strings.TrimSpace(r.Header.Get("Origin"))
+				if origin == "" {
+					return true
+				}
+				_, ok := allowedOrigins[origin]
+				return ok
 			},
 		},
 	}
@@ -43,8 +59,8 @@ func (h *WSHandler) Handle(c *gin.Context) {
 		return
 	}
 
-	if _, err := h.userRepo.GetByID(userID); err != nil {
-		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: "User not found"})
+	if _, err := loadActiveUserByID(h.userRepo, userID); err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
 		return
 	}
 
@@ -58,7 +74,11 @@ func (h *WSHandler) Handle(c *gin.Context) {
 }
 
 func (h *WSHandler) getUserIDFromRequest(c *gin.Context) (int64, error) {
-	tokenString := strings.TrimSpace(c.Query("token"))
+	tokenString := ""
+	subprotocols := websocket.Subprotocols(c.Request)
+	if len(subprotocols) >= 2 && strings.EqualFold(strings.TrimSpace(subprotocols[0]), websocketAuthProtocol) {
+		tokenString = strings.TrimSpace(subprotocols[1])
+	}
 	if tokenString == "" {
 		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
 		parts := strings.SplitN(authHeader, " ", 2)
@@ -70,51 +90,33 @@ func (h *WSHandler) getUserIDFromRequest(c *gin.Context) (int64, error) {
 		return 0, fmt.Errorf("missing bearer token")
 	}
 
-	log.Printf("[WS] Token received (length: %d, first 50chars: %s)", len(tokenString), tokenString[:min(50, len(tokenString))])
-
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		// Check if the signing method is HS256
 		if token.Method.Alg() != "HS256" {
-			log.Printf("[WS] ERROR: Wrong signing method: %s", token.Method.Alg())
 			return nil, fmt.Errorf("unexpected signing method: %s", token.Method.Alg())
 		}
 		return h.jwtSecret, nil
 	})
 	if err != nil {
-		log.Printf("[WS] ERROR: JWT parse failed: %v", err)
 		return 0, fmt.Errorf("invalid token: %w", err)
 	}
 	if !token.Valid {
-		log.Printf("[WS] ERROR: Token is invalid (valid=%v)", token.Valid)
 		return 0, fmt.Errorf("token is not valid")
 	}
-	log.Printf("[WS] Token parsed successfully")
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		log.Printf("[WS] ERROR: Claims type assertion failed")
 		return 0, fmt.Errorf("invalid token claims")
 	}
 
 	subValue, exists := claims["sub"]
 	if !exists {
-		log.Printf("[WS] ERROR: Missing 'sub' claim in token")
 		return 0, fmt.Errorf("missing subject in token")
 	}
 
 	userID, err := convertClaimToInt64(subValue)
 	if err != nil {
-		log.Printf("[WS] ERROR: Failed to convert sub to int64: %v", err)
 		return 0, fmt.Errorf("invalid subject in token")
 	}
 
-	log.Printf("[WS] User ID extracted: %d", userID)
 	return userID, nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

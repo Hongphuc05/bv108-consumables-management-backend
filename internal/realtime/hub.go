@@ -174,9 +174,9 @@ func (h *Hub) SendToUser(userID int64, eventType string, payload interface{}) {
 	}
 
 	h.mu.RLock()
-	userClients := h.clients[userID]
-	h.mu.RUnlock()
+	defer h.mu.RUnlock()
 
+	userClients := h.clients[userID]
 	for client := range userClients {
 		select {
 		case client.send <- message:

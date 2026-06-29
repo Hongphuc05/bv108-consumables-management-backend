@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"bv108-consumables-management-backend/internal/models"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -12,14 +14,31 @@ type internalSupplySyncRunner interface {
 }
 
 type InternalSupplySyncHandler struct {
-	runner internalSupplySyncRunner
+	runner    internalSupplySyncRunner
+	userRepo  *models.UserRepository
+	jwtSecret []byte
 }
 
-func NewInternalSupplySyncHandler(runner internalSupplySyncRunner) *InternalSupplySyncHandler {
-	return &InternalSupplySyncHandler{runner: runner}
+func NewInternalSupplySyncHandler(runner internalSupplySyncRunner, userRepo *models.UserRepository, jwtSecret string) *InternalSupplySyncHandler {
+	return &InternalSupplySyncHandler{
+		runner:    runner,
+		userRepo:  userRepo,
+		jwtSecret: []byte(jwtSecret),
+	}
 }
 
 func (h *InternalSupplySyncHandler) SyncNow(c *gin.Context) {
+	currentUser, err := getCurrentUserFromAuthorizationHeader(c, h.userRepo, h.jwtSecret)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !canRunInternalSupplySyncRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin can run internal supply sync"})
+		return
+	}
+
 	count, err := h.runner.RunOnce(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -34,4 +53,8 @@ func (h *InternalSupplySyncHandler) SyncNow(c *gin.Context) {
 		"message": "Internal supply sync completed",
 		"count":   count,
 	})
+}
+
+func canRunInternalSupplySyncRole(role string) bool {
+	return normalizeRoleForPermissions(role) == RoleAdmin
 }

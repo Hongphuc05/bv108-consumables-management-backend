@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -32,17 +33,20 @@ type CreateForecastOrdersRequest struct {
 }
 
 type CreateOrderItemRequest struct {
-	NhaThau    string `json:"nhaThau"`
-	MaQuanLy   string `json:"maQuanLy"`
-	MaVtytCu   string `json:"maVtytCu"`
-	TenVtytBv  string `json:"tenVtytBv"`
-	MaHieu     string `json:"maHieu"`
-	HangSx     string `json:"hangSx"`
-	DonViTinh  string `json:"donViTinh"`
-	QuyCach    string `json:"quyCach"`
-	DotGoiHang int    `json:"dotGoiHang"`
-	Email      string `json:"email"`
+	CompanyContactID *string `json:"companyContactId"`
+	NhaThau          string  `json:"nhaThau"`
+	MaQuanLy         string  `json:"maQuanLy"`
+	MaVtytCu         string  `json:"maVtytCu"`
+	TenVtytBv        string  `json:"tenVtytBv"`
+	MaHieu           string  `json:"maHieu"`
+	HangSx           string  `json:"hangSx"`
+	DonViTinh        string  `json:"donViTinh"`
+	QuyCach          string  `json:"quyCach"`
+	DotGoiHang       int     `json:"dotGoiHang"`
+	Email            string  `json:"email"`
 }
+
+var errCompanyContactNotFound = errors.New("company contact not found")
 
 type PlaceOrdersRequest struct {
 	OrderIDs []int64 `json:"orderIds" binding:"required"`
@@ -63,6 +67,38 @@ type SaveInvoiceReconciliationItemRequest struct {
 	Status string `json:"status"`
 }
 
+type UpsertInvoiceReconciliationsBulkRequest struct {
+	Items []UpsertInvoiceReconciliationItemRequest `json:"items" binding:"required"`
+}
+
+type UpsertInvoiceReconciliationItemRequest struct {
+	OrderHistoryID          int64   `json:"orderHistoryId"`
+	OrderBatchKey           string  `json:"orderBatchKey"`
+	CompanyContactID        *string `json:"companyContactId"`
+	NhaThau                 string  `json:"nhaThau"`
+	MaQuanLy                string  `json:"maQuanLy"`
+	MaVtytCu                string  `json:"maVtytCu"`
+	TenVtytBv               string  `json:"tenVtytBv"`
+	OrderedQty              int     `json:"orderedQty"`
+	OrderTime               string  `json:"orderTime"`
+	InvoiceNumber           string  `json:"invoiceNumber"`
+	InvoiceIDHoaDon         string  `json:"invoiceIdHoaDon"`
+	InvoiceRowID            *int64  `json:"invoiceRowId"`
+	InvoiceCompanyContactID *string `json:"invoiceCompanyContactId"`
+	InvoiceCompanyName      string  `json:"invoiceCompanyName"`
+	InvoiceItemCode         string  `json:"invoiceItemCode"`
+	InvoiceItemName         string  `json:"invoiceItemName"`
+	InvoiceQty              float64 `json:"invoiceQty"`
+	InvoiceTime             string  `json:"invoiceTime"`
+	HasInvoice              bool    `json:"hasInvoice"`
+	DetailStatus            string  `json:"detailStatus"`
+	DetailNote              string  `json:"detailNote"`
+	MatchScore              float64 `json:"matchScore"`
+	QuantityDiff            float64 `json:"quantityDiff"`
+	Note                    string  `json:"note"`
+	Status                  string  `json:"status"`
+}
+
 func NewOrderHandler(repo *models.OrderRepository, invoiceMatchRepo *models.InvoiceReconciliationRepository, unreadRepo *models.OrderUnreadRepository, companyContactRepo *models.CompanyContactRepository, userRepo *models.UserRepository, jwtSecret string, mailer services.OrderEmailSender, hub *realtime.Hub) *OrderHandler {
 	return &OrderHandler{
 		repo:               repo,
@@ -76,6 +112,90 @@ func NewOrderHandler(repo *models.OrderRepository, invoiceMatchRepo *models.Invo
 	}
 }
 
+func (h *OrderHandler) UpsertInvoiceReconciliations(c *gin.Context) {
+	if h.invoiceMatchRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "UNAVAILABLE", Message: "Invoice reconciliation repository is not configured"})
+		return
+	}
+
+	currentUser, err := h.getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !canManageInvoiceWorkflowRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin, Chi huy khoa, or Nhan vien ke toan can create invoice reconciliation records"})
+		return
+	}
+
+	var req UpsertInvoiceReconciliationsBulkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "Invalid invoice reconciliation upsert payload"})
+		return
+	}
+
+	if len(req.Items) == 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "At least one reconciliation item is required"})
+		return
+	}
+
+	now := time.Now().UTC()
+	inputs := make([]models.UpsertInvoiceReconciliationInput, 0, len(req.Items))
+	for _, item := range req.Items {
+		if item.OrderHistoryID <= 0 {
+			continue
+		}
+
+		orderTime, _ := parseOptionalRFC3339(item.OrderTime)
+		invoiceTime, _ := parseOptionalRFC3339(item.InvoiceTime)
+
+		inputs = append(inputs, models.UpsertInvoiceReconciliationInput{
+			OrderHistoryID:          item.OrderHistoryID,
+			OrderBatchKey:           strings.TrimSpace(item.OrderBatchKey),
+			CompanyContactID:        trimOptionalStringPointer(item.CompanyContactID),
+			NhaThau:                 strings.TrimSpace(item.NhaThau),
+			MaQuanLy:                strings.TrimSpace(item.MaQuanLy),
+			MaVtytCu:                strings.TrimSpace(item.MaVtytCu),
+			TenVtytBv:               strings.TrimSpace(item.TenVtytBv),
+			OrderedQty:              item.OrderedQty,
+			OrderTime:               orderTime,
+			InvoiceNumber:           strings.TrimSpace(item.InvoiceNumber),
+			InvoiceIDHoaDon:         strings.TrimSpace(item.InvoiceIDHoaDon),
+			InvoiceRowID:            item.InvoiceRowID,
+			InvoiceCompanyContactID: trimOptionalStringPointer(item.InvoiceCompanyContactID),
+			InvoiceCompanyName:      strings.TrimSpace(item.InvoiceCompanyName),
+			InvoiceItemCode:         strings.TrimSpace(item.InvoiceItemCode),
+			InvoiceItemName:         strings.TrimSpace(item.InvoiceItemName),
+			InvoiceQty:              item.InvoiceQty,
+			InvoiceTime:             invoiceTime,
+			HasInvoice:              item.HasInvoice,
+			DetailStatus:            strings.TrimSpace(item.DetailStatus),
+			DetailNote:              strings.TrimSpace(item.DetailNote),
+			MatchScore:              item.MatchScore,
+			QuantityDiff:            item.QuantityDiff,
+			MatchedByUserID:         &currentUser.ID,
+			MatchedByUsername:       currentUser.Username,
+			MatchedByEmail:          currentUser.Email,
+			MatchedAt:               now,
+			Note:                    strings.TrimSpace(item.Note),
+			Status:                  strings.TrimSpace(item.Status),
+		})
+	}
+
+	if len(inputs) == 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "No valid reconciliation items to upsert"})
+		return
+	}
+
+	if err := h.invoiceMatchRepo.UpsertBulk(inputs); err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Invoice reconciliation records upserted", "count": len(inputs)})
+}
+
 func (h *OrderHandler) SaveInvoiceReconciliations(c *gin.Context) {
 	if h.invoiceMatchRepo == nil {
 		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "UNAVAILABLE", Message: "Invoice reconciliation repository is not configured"})
@@ -85,6 +205,11 @@ func (h *OrderHandler) SaveInvoiceReconciliations(c *gin.Context) {
 	currentUser, err := h.getCurrentUser(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !canManageInvoiceWorkflowRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin, Chi huy khoa, or Nhan vien ke toan can update invoice reconciliation"})
 		return
 	}
 
@@ -201,8 +326,14 @@ func (h *OrderHandler) GetInvoiceReconciliationHistory(c *gin.Context) {
 		return
 	}
 
-	if _, err := h.getCurrentUser(c); err != nil {
+	currentUser, err := h.getCurrentUser(c)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !canManageInvoiceWorkflowRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin, Chi huy khoa, or Nhan vien ke toan can view invoice reconciliation history"})
 		return
 	}
 
@@ -233,8 +364,14 @@ func (h *OrderHandler) GetMatchedInvoiceNumbers(c *gin.Context) {
 		return
 	}
 
-	if _, err := h.getCurrentUser(c); err != nil {
+	currentUser, err := h.getCurrentUser(c)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !canManageInvoiceWorkflowRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin, Chi huy khoa, or Nhan vien ke toan can view matched invoices"})
 		return
 	}
 
@@ -279,8 +416,14 @@ func (h *OrderHandler) GetMatchedOrderReconciliations(c *gin.Context) {
 		return
 	}
 
-	if _, err := h.getCurrentUser(c); err != nil {
+	currentUser, err := h.getCurrentUser(c)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !canManageInvoiceWorkflowRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin, Chi huy khoa, or Nhan vien ke toan can view matched order reconciliations"})
 		return
 	}
 
@@ -299,8 +442,14 @@ func (h *OrderHandler) SearchCompanyContacts(c *gin.Context) {
 		return
 	}
 
-	if _, err := h.getCurrentUser(c); err != nil {
+	currentUser, err := h.getCurrentUser(c)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !canCreateManualOrderRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin or Chi huy khoa can search company contacts"})
 		return
 	}
 
@@ -473,13 +622,63 @@ func (h *OrderHandler) resolveForecastOrderContact(item CreateOrderItemRequest) 
 		}
 	}
 
-	return nil, models.DefaultCompanyContactEmail, nil
+	return nil, models.ResolveDefaultCompanyContactEmail(), nil
+}
+
+func (h *OrderHandler) resolveManualOrderContact(item CreateOrderItemRequest) (*string, string, error) {
+	if h.companyContactRepo != nil && item.CompanyContactID != nil {
+		normalizedCompanyContactID := strings.TrimSpace(*item.CompanyContactID)
+		if normalizedCompanyContactID != "" {
+			contact, err := h.companyContactRepo.GetByTaxID(normalizedCompanyContactID)
+			if err != nil {
+				return nil, "", err
+			}
+			if contact == nil {
+				return nil, "", errCompanyContactNotFound
+			}
+
+			if email := sanitizeText(item.Email); email != "" {
+				return &normalizedCompanyContactID, email, nil
+			}
+
+			if contactEmail := strings.TrimSpace(contact.Email); contactEmail != "" {
+				return &normalizedCompanyContactID, contactEmail, nil
+			}
+
+			return &normalizedCompanyContactID, models.ResolveDefaultCompanyContactEmail(), nil
+		}
+	}
+
+	if email := sanitizeText(item.Email); email != "" {
+		return nil, email, nil
+	}
+
+	if h.companyContactRepo != nil {
+		contact, err := h.companyContactRepo.GetByCompanyName(item.NhaThau)
+		if err != nil {
+			return nil, "", err
+		}
+		if contact != nil && strings.TrimSpace(contact.Email) != "" {
+			maSoThue := strings.TrimSpace(contact.MaSoThue)
+			if maSoThue == "" {
+				return nil, strings.TrimSpace(contact.Email), nil
+			}
+			return &maSoThue, strings.TrimSpace(contact.Email), nil
+		}
+	}
+
+	return nil, models.ResolveDefaultCompanyContactEmail(), nil
 }
 
 func (h *OrderHandler) CreateManualOrder(c *gin.Context) {
 	currentUser, err := h.getCurrentUser(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !canCreateManualOrderRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin or Chi huy khoa can create manual orders"})
 		return
 	}
 
@@ -499,19 +698,30 @@ func (h *OrderHandler) CreateManualOrder(c *gin.Context) {
 		return
 	}
 
+	companyContactID, resolvedEmail, err := h.resolveManualOrderContact(req)
+	if err != nil {
+		if errors.Is(err, errCompanyContactNotFound) {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "companyContactId is invalid"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
 	input := models.CreatePendingOrderInput{
-		NhaThau:    sanitizeText(req.NhaThau),
-		MaQuanLy:   sanitizeText(req.MaQuanLy),
-		MaVtytCu:   sanitizeText(req.MaVtytCu),
-		TenVtytBv:  sanitizeText(req.TenVtytBv),
-		MaHieu:     sanitizeText(req.MaHieu),
-		HangSx:     sanitizeText(req.HangSx),
-		DonViTinh:  sanitizeText(req.DonViTinh),
-		QuyCach:    sanitizeText(req.QuyCach),
-		DotGoiHang: req.DotGoiHang,
-		Email:      sanitizeText(req.Email),
-		Source:     models.OrderSourceManual,
-		CreatedBy:  models.OrderActor{ID: currentUser.ID, Username: currentUser.Username, Email: currentUser.Email},
+		CompanyContactID: companyContactID,
+		NhaThau:          sanitizeText(req.NhaThau),
+		MaQuanLy:         sanitizeText(req.MaQuanLy),
+		MaVtytCu:         sanitizeText(req.MaVtytCu),
+		TenVtytBv:        sanitizeText(req.TenVtytBv),
+		MaHieu:           sanitizeText(req.MaHieu),
+		HangSx:           sanitizeText(req.HangSx),
+		DonViTinh:        sanitizeText(req.DonViTinh),
+		QuyCach:          sanitizeText(req.QuyCach),
+		DotGoiHang:       req.DotGoiHang,
+		Email:            resolvedEmail,
+		Source:           models.OrderSourceManual,
+		CreatedBy:        models.OrderActor{ID: currentUser.ID, Username: currentUser.Username, Email: currentUser.Email},
 	}
 
 	if err := h.repo.AddManualOrder(input); err != nil {
@@ -857,7 +1067,7 @@ func (h *OrderHandler) getCurrentUser(c *gin.Context) (*models.UserProfile, erro
 		return nil, err
 	}
 
-	user, err := h.userRepo.GetByID(userID)
+	user, err := loadActiveUserByID(h.userRepo, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -954,12 +1164,35 @@ func parseOptionalRFC3339(value string) (*time.Time, bool) {
 		return nil, false
 	}
 
-	parsed, err := time.Parse(time.RFC3339, raw)
-	if err != nil {
-		return nil, false
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
 	}
 
-	return &parsed, true
+	for _, layout := range layouts {
+		parsed, err := time.Parse(layout, raw)
+		if err == nil {
+			return &parsed, true
+		}
+	}
+
+	return nil, false
+}
+
+func trimOptionalStringPointer(value *string) *string {
+	if value == nil {
+		return nil
+	}
+
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+
+	return &trimmed
 }
 
 func (h *OrderHandler) pushUnreadSnapshot(userID int64) {

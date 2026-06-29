@@ -10,16 +10,38 @@ import (
 
 // HoaDonHandler handles HTTP requests for hoa_don
 type HoaDonHandler struct {
-	repo *models.HoaDonRepository
+	repo      *models.HoaDonRepository
+	userRepo  *models.UserRepository
+	jwtSecret []byte
 }
 
 // NewHoaDonHandler creates a new handler instance
-func NewHoaDonHandler(repo *models.HoaDonRepository) *HoaDonHandler {
-	return &HoaDonHandler{repo: repo}
+func NewHoaDonHandler(repo *models.HoaDonRepository, userRepo *models.UserRepository, jwtSecret string) *HoaDonHandler {
+	return &HoaDonHandler{
+		repo:      repo,
+		userRepo:  userRepo,
+		jwtSecret: []byte(jwtSecret),
+	}
+}
+
+func (h *HoaDonHandler) requireAuthenticatedUser(c *gin.Context) bool {
+	if _, err := getCurrentUserFromAuthorizationHeader(c, h.userRepo, h.jwtSecret); err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Error:   "UNAUTHORIZED",
+			Message: err.Error(),
+		})
+		return false
+	}
+
+	return true
 }
 
 // GetAllHoaDon handles GET /api/hoa-don
 func (h *HoaDonHandler) GetAllHoaDon(c *gin.Context) {
+	if !h.requireAuthenticatedUser(c) {
+		return
+	}
+
 	// Pagination parameters
 	limitStr := c.DefaultQuery("limit", "100")
 	offsetStr := c.DefaultQuery("offset", "0")
@@ -64,6 +86,10 @@ func (h *HoaDonHandler) GetAllHoaDon(c *gin.Context) {
 
 // GetHoaDonByID handles GET /api/hoa-don/:id
 func (h *HoaDonHandler) GetHoaDonByID(c *gin.Context) {
+	if !h.requireAuthenticatedUser(c) {
+		return
+	}
+
 	idHoaDon := c.Param("id")
 
 	if idHoaDon == "" {
@@ -96,6 +122,10 @@ func (h *HoaDonHandler) GetHoaDonByID(c *gin.Context) {
 
 // SearchHoaDon handles GET /api/hoa-don/search
 func (h *HoaDonHandler) SearchHoaDon(c *gin.Context) {
+	if !h.requireAuthenticatedUser(c) {
+		return
+	}
+
 	keyword := c.Query("q")
 
 	if keyword == "" {

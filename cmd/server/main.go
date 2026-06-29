@@ -75,7 +75,7 @@ func runCompanyContactWarmup(repo *models.CompanyContactRepository) {
 	startedAt := time.Now()
 	log.Println("[startup] company contact warmup started (background)")
 
-	if err := repo.SyncFromExistingData(models.DefaultCompanyContactEmail); err != nil {
+	if err := repo.SyncFromExistingData(models.ResolveDefaultCompanyContactEmail()); err != nil {
 		log.Printf("[startup] company contact warmup sync failed: %v", err)
 		return
 	}
@@ -111,7 +111,12 @@ func main() {
 	supplyTaskRepo := models.NewSupplyTaskRepository(database.DB)
 	supplyHandler := handlers.NewSupplyHandler(supplyRepo, userRepo, supplyTaskRepo, config.AppConfig.JWTSecret)
 	supplyTaskHandler := handlers.NewSupplyTaskHandler(supplyRepo, supplyTaskRepo, userRepo, config.AppConfig.JWTSecret)
-	authHandler := handlers.NewAuthHandler(userRepo, config.AppConfig.JWTSecret, config.AppConfig.JWTExpiresHours)
+	authHandler := handlers.NewAuthHandler(
+		userRepo,
+		config.AppConfig.JWTSecret,
+		config.AppConfig.JWTExpiresHours,
+		config.AppConfig.JWTExpiresMinutes,
+	)
 	orderRepo := models.NewOrderRepository(database.DB)
 	invoiceMatchRepo := models.NewInvoiceReconciliationRepository(database.DB)
 	orderUnreadRepo := models.NewOrderUnreadRepository(database.DB)
@@ -137,16 +142,20 @@ func main() {
 		config.AppConfig.SMTPFrom,
 	)
 	realtimeHub := realtime.NewHub()
-	wsHandler := handlers.NewWSHandler(userRepo, config.AppConfig.JWTSecret, realtimeHub)
+	wsHandler := handlers.NewWSHandler(userRepo, config.AppConfig.JWTSecret, realtimeHub, config.AppConfig.FrontendURL)
 	orderHandler := handlers.NewOrderHandler(orderRepo, invoiceMatchRepo, orderUnreadRepo, companyContactRepo, userRepo, config.AppConfig.JWTSecret, orderMailer, realtimeHub)
 	forecastApprovalHandler := handlers.NewForecastApprovalHandler(forecastApprovalRepo, userRepo, config.AppConfig.JWTSecret, realtimeHub)
 
 	hoaDonRepo := models.NewHoaDonRepository(database.DB)
-	hoaDonHandler := handlers.NewHoaDonHandler(hoaDonRepo)
-	refreshHandler := handlers.NewRefreshHandler(hoaDonRepo, realtimeHub)
+	hoaDonHandler := handlers.NewHoaDonHandler(hoaDonRepo, userRepo, config.AppConfig.JWTSecret)
+	refreshHandler := handlers.NewRefreshHandler(hoaDonRepo, userRepo, config.AppConfig.JWTSecret, realtimeHub)
 
 	internalSupplySyncService := services.NewInternalSupplySyncService(config.AppConfig, supplyRepo)
-	internalSupplySyncHandler := handlers.NewInternalSupplySyncHandler(internalSupplySyncService)
+	internalSupplySyncHandler := handlers.NewInternalSupplySyncHandler(
+		internalSupplySyncService,
+		userRepo,
+		config.AppConfig.JWTSecret,
+	)
 	backgroundCtx, cancelBackground := context.WithCancel(context.Background())
 	defer cancelBackground()
 	internalSupplySyncService.Start(backgroundCtx)
@@ -230,6 +239,7 @@ func main() {
 			orders.POST("/pending/manual", orderHandler.CreateManualOrder)
 			orders.POST("/place", orderHandler.PlaceOrders)
 			orders.POST("/history/reorder", orderHandler.RepeatOrderHistory)
+			orders.POST("/invoice-reconciliations/upsert", orderHandler.UpsertInvoiceReconciliations)
 			orders.POST("/invoice-reconciliations/bulk", orderHandler.SaveInvoiceReconciliations)
 			orders.POST("/alerts/suppliers/seen", orderHandler.MarkSupplierAlertSeen)
 			orders.POST("/groups/seen", orderHandler.MarkGroupsSeen)

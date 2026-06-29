@@ -46,7 +46,7 @@ func (r *SchemaMaintenanceRepository) EnsureRelationalIntegrity() error {
 
 func (r *SchemaMaintenanceRepository) runRelationalIntegrityMigration() error {
 	companyRepo := NewCompanyContactRepository(r.DB)
-	if err := companyRepo.SyncFromExistingData(DefaultCompanyContactEmail); err != nil {
+	if err := companyRepo.SyncFromExistingData(ResolveDefaultCompanyContactEmail()); err != nil {
 		return fmt.Errorf("error syncing company contacts before relational migration: %w", err)
 	}
 	if err := companyRepo.BackfillOrderReferences(); err != nil {
@@ -196,10 +196,107 @@ func (r *SchemaMaintenanceRepository) isRelationalIntegritySatisfied() (bool, er
 }
 
 func (r *SchemaMaintenanceRepository) backfillHoaDonCompanyReferences() error {
+	exists, err := r.tableExists("hoa_don")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	if _, err := r.DB.Exec(`
+		UPDATE hoa_don h
+		INNER JOIN company_contacts c
+			ON TRIM(COALESCE(h.ma_so_thue_nguoi_ban, '')) <> ''
+			AND TRIM(COALESCE(h.ma_so_thue_nguoi_ban, '')) = TRIM(COALESCE(c.ma_so_thue, ''))
+		SET h.company_contact_id = c.ma_so_thue
+		WHERE TRIM(COALESCE(h.company_contact_id, '')) = ''
+	`); err != nil {
+		return fmt.Errorf("error backfilling hoa_don company references by tax id: %w", err)
+	}
+
+	if _, err := r.DB.Exec(`
+		UPDATE hoa_don h
+		INNER JOIN company_contacts c
+			ON LOWER(TRIM(COALESCE(h.cong_ty, ''))) = LOWER(TRIM(COALESCE(c.ten_cong_ty, '')))
+		SET h.company_contact_id = c.ma_so_thue
+		WHERE TRIM(COALESCE(h.company_contact_id, '')) = ''
+		  AND TRIM(COALESCE(h.cong_ty, '')) <> ''
+	`); err != nil {
+		return fmt.Errorf("error backfilling hoa_don company references by company name: %w", err)
+	}
+
 	return nil
 }
 
 func (r *SchemaMaintenanceRepository) backfillInvoiceCompanyReferences() error {
+	exists, err := r.tableExists("order_invoice_reconciliation")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	if _, err := r.DB.Exec(`
+		UPDATE order_invoice_reconciliation r
+		INNER JOIN order_history o ON o.id = r.order_history_id
+		SET r.company_contact_id = o.company_contact_id
+		WHERE TRIM(COALESCE(r.company_contact_id, '')) = ''
+		  AND TRIM(COALESCE(o.company_contact_id, '')) <> ''
+	`); err != nil {
+		return fmt.Errorf("error backfilling reconciliation company references from order history: %w", err)
+	}
+
+	if _, err := r.DB.Exec(`
+		UPDATE order_invoice_reconciliation r
+		INNER JOIN company_contacts c
+			ON LOWER(TRIM(COALESCE(r.nha_thau, ''))) = LOWER(TRIM(COALESCE(c.ten_cong_ty, '')))
+		SET r.company_contact_id = c.ma_so_thue
+		WHERE TRIM(COALESCE(r.company_contact_id, '')) = ''
+		  AND TRIM(COALESCE(r.nha_thau, '')) <> ''
+	`); err != nil {
+		return fmt.Errorf("error backfilling reconciliation company references by supplier name: %w", err)
+	}
+
+	if _, err := r.DB.Exec(`
+		UPDATE order_invoice_reconciliation r
+		INNER JOIN hoa_don h ON h.id = r.invoice_row_id
+		SET r.invoice_company_contact_id = h.company_contact_id
+		WHERE TRIM(COALESCE(r.invoice_company_contact_id, '')) = ''
+		  AND r.invoice_row_id IS NOT NULL
+		  AND TRIM(COALESCE(h.company_contact_id, '')) <> ''
+	`); err != nil {
+		return fmt.Errorf("error backfilling invoice company references by invoice row id: %w", err)
+	}
+
+	if _, err := r.DB.Exec(`
+		UPDATE order_invoice_reconciliation r
+		INNER JOIN (
+			SELECT id_hoa_don, MIN(company_contact_id) AS company_contact_id
+			FROM hoa_don
+			WHERE TRIM(COALESCE(id_hoa_don, '')) <> ''
+			  AND TRIM(COALESCE(company_contact_id, '')) <> ''
+			GROUP BY id_hoa_don
+		) h ON h.id_hoa_don = r.invoice_id_hoa_don
+		SET r.invoice_company_contact_id = h.company_contact_id
+		WHERE TRIM(COALESCE(r.invoice_company_contact_id, '')) = ''
+		  AND TRIM(COALESCE(r.invoice_id_hoa_don, '')) <> ''
+	`); err != nil {
+		return fmt.Errorf("error backfilling invoice company references by invoice id_hoa_don: %w", err)
+	}
+
+	if _, err := r.DB.Exec(`
+		UPDATE order_invoice_reconciliation r
+		INNER JOIN company_contacts c
+			ON LOWER(TRIM(COALESCE(r.invoice_company_name, ''))) = LOWER(TRIM(COALESCE(c.ten_cong_ty, '')))
+		SET r.invoice_company_contact_id = c.ma_so_thue
+		WHERE TRIM(COALESCE(r.invoice_company_contact_id, '')) = ''
+		  AND TRIM(COALESCE(r.invoice_company_name, '')) <> ''
+	`); err != nil {
+		return fmt.Errorf("error backfilling invoice company references by invoice company name: %w", err)
+	}
+
 	return nil
 }
 
@@ -405,6 +502,46 @@ func (r *SchemaMaintenanceRepository) ensureIndexes() error {
 
 func (r *SchemaMaintenanceRepository) cleanupNullableOrphans() error {
 	statements := []string{
+		`
+		UPDATE pending_orders p
+		LEFT JOIN company_contacts c ON c.ma_so_thue = p.company_contact_id
+		SET p.company_contact_id = NULL
+		WHERE p.company_contact_id IS NOT NULL
+		  AND TRIM(COALESCE(p.company_contact_id, '')) <> ''
+		  AND c.ma_so_thue IS NULL
+		`,
+		`
+		UPDATE order_history o
+		LEFT JOIN company_contacts c ON c.ma_so_thue = o.company_contact_id
+		SET o.company_contact_id = NULL
+		WHERE o.company_contact_id IS NOT NULL
+		  AND TRIM(COALESCE(o.company_contact_id, '')) <> ''
+		  AND c.ma_so_thue IS NULL
+		`,
+		`
+		UPDATE hoa_don h
+		LEFT JOIN company_contacts c ON c.ma_so_thue = h.company_contact_id
+		SET h.company_contact_id = NULL
+		WHERE h.company_contact_id IS NOT NULL
+		  AND TRIM(COALESCE(h.company_contact_id, '')) <> ''
+		  AND c.ma_so_thue IS NULL
+		`,
+		`
+		UPDATE order_invoice_reconciliation r
+		LEFT JOIN company_contacts c ON c.ma_so_thue = r.company_contact_id
+		SET r.company_contact_id = NULL
+		WHERE r.company_contact_id IS NOT NULL
+		  AND TRIM(COALESCE(r.company_contact_id, '')) <> ''
+		  AND c.ma_so_thue IS NULL
+		`,
+		`
+		UPDATE order_invoice_reconciliation r
+		LEFT JOIN company_contacts c ON c.ma_so_thue = r.invoice_company_contact_id
+		SET r.invoice_company_contact_id = NULL
+		WHERE r.invoice_company_contact_id IS NOT NULL
+		  AND TRIM(COALESCE(r.invoice_company_contact_id, '')) <> ''
+		  AND c.ma_so_thue IS NULL
+		`,
 		`
 		UPDATE pending_orders p
 		LEFT JOIN users u ON u.id = p.nguoi_phe_duyet_id

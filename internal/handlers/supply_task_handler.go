@@ -160,6 +160,24 @@ func (h *SupplyTaskHandler) GetAssignmentsByUser(c *gin.Context) {
 		return
 	}
 
+	targetUser, err := loadSupplyAssignmentUser(h.userRepo, userID)
+	if err != nil {
+		switch err.Error() {
+		case "user not found":
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "Người dùng không tồn tại"})
+			return
+		case "user account is disabled":
+			c.JSON(http.StatusForbidden, ErrorResponse{Error: "ACCOUNT_DISABLED", Message: "Tài khoản đã bị vô hiệu hóa"})
+			return
+		case "user is not eligible for supply assignments":
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_USER", Message: "Chỉ Nhân viên thầu mới được nhận phân công vật tư"})
+			return
+		default:
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+			return
+		}
+	}
+
 	assignments, err := h.taskRepo.GetAssignedSupplyDetailsByUserID(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
@@ -168,6 +186,8 @@ func (h *SupplyTaskHandler) GetAssignmentsByUser(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"userId":      userID,
+		"username":    targetUser.Username,
+		"userRole":    targetUser.Role,
 		"assignments": assignments,
 	})
 }
@@ -187,6 +207,23 @@ func (h *SupplyTaskHandler) UpdateAssignmentsByUser(c *gin.Context) {
 	if req.UserID <= 0 {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_USER", Message: "userId không hợp lệ"})
 		return
+	}
+
+	if _, err := loadSupplyAssignmentUser(h.userRepo, req.UserID); err != nil {
+		switch err.Error() {
+		case "user not found":
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "Người dùng không tồn tại"})
+			return
+		case "user account is disabled":
+			c.JSON(http.StatusForbidden, ErrorResponse{Error: "ACCOUNT_DISABLED", Message: "Tài khoản đã bị vô hiệu hóa"})
+			return
+		case "user is not eligible for supply assignments":
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_USER", Message: "Chỉ Nhân viên thầu mới được nhận phân công vật tư"})
+			return
+		default:
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+			return
+		}
 	}
 
 	uniqueSupplyMap := make(map[int]struct{})
@@ -403,8 +440,8 @@ func (h *SupplyTaskHandler) ImportAssignments(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":      "Import phân công vật tư thành công",
-		"updatedCount": len(assignments),
+		"message":       "Import phân công vật tư thành công",
+		"updatedCount":  len(assignments),
 		"assignedCount": assignedCount,
 		"clearedCount":  clearedCount,
 	})

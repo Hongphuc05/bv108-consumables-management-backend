@@ -22,11 +22,13 @@ type Config struct {
 	SMTPUsername                    string
 	SMTPAppPassword                 string
 	SMTPFrom                        string
+	DefaultCompanyContactEmail      string
 	ServerPort                      string
 	GinMode                         string
 	FrontendURL                     string
 	JWTSecret                       string
 	JWTExpiresHours                 int
+	JWTExpiresMinutes               int
 	InternalSupplyAPIURL            string
 	InternalSupplyAPIToken          string
 	InternalSupplyAPITimeoutSeconds int
@@ -60,11 +62,13 @@ func LoadConfig() error {
 		SMTPUsername:                    getEnv("SMTP_USERNAME", ""),
 		SMTPAppPassword:                 getEnv("SMTP_APP_PASSWORD", ""),
 		SMTPFrom:                        getEnv("SMTP_FROM", getEnv("SMTP_USERNAME", "")),
+		DefaultCompanyContactEmail:      getEnv("DEFAULT_COMPANY_CONTACT_EMAIL", getEnv("SMTP_FROM", getEnv("SMTP_USERNAME", ""))),
 		ServerPort:                      serverPort,
 		GinMode:                         getEnv("GIN_MODE", "debug"),
 		FrontendURL:                     getEnv("FRONTEND_URL", "http://localhost:5173"),
 		JWTSecret:                       getEnv("JWT_SECRET", ""),
 		JWTExpiresHours:                 getEnvAsInt("JWT_EXPIRES_HOURS", 8),
+		JWTExpiresMinutes:               getEnvAsInt("JWT_EXPIRES_MINUTES", 0),
 		InternalSupplyAPIURL:            getEnv("INTERNAL_SUPPLY_API_URL", ""),
 		InternalSupplyAPIToken:          getEnv("INTERNAL_SUPPLY_API_TOKEN", ""),
 		InternalSupplyAPITimeoutSeconds: getEnvAsInt("INTERNAL_SUPPLY_API_TIMEOUT_SECONDS", 120),

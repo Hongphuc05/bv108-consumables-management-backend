@@ -3,10 +3,11 @@ package models
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
-)
 
-const DefaultCompanyContactEmail = "ngottha110@gmail.com"
+	"bv108-consumables-management-backend/config"
+)
 
 type CompanyContact struct {
 	MaSoThue       string `json:"maSoThue"`
@@ -43,6 +44,18 @@ func NewCompanyContactRepository(db *sql.DB) *CompanyContactRepository {
 	return &CompanyContactRepository{DB: db}
 }
 
+func ResolveDefaultCompanyContactEmail() string {
+	if config.AppConfig == nil {
+		return ""
+	}
+
+	if email := normalizeCompanyEmail(config.AppConfig.DefaultCompanyContactEmail); email != "" {
+		return email
+	}
+
+	return normalizeCompanyEmail(config.AppConfig.SMTPFrom)
+}
+
 func (r *CompanyContactRepository) EnsureSchema() error {
 	statement := `
 		CREATE TABLE IF NOT EXISTS company_contacts (
@@ -69,6 +82,45 @@ func (r *CompanyContactRepository) EnsureSchema() error {
 }
 
 func (r *CompanyContactRepository) SyncFromExistingData(defaultEmail string) error {
+	normalizedDefaultEmail := normalizeCompanyEmail(defaultEmail)
+	if normalizedDefaultEmail == "" {
+		normalizedDefaultEmail = ResolveDefaultCompanyContactEmail()
+	}
+
+	exists, err := r.tableExists("hoa_don")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	if _, err := r.DB.Exec(`
+		INSERT INTO company_contacts (
+			ma_so_thue,
+			ten_cong_ty,
+			gmail
+		)
+		SELECT DISTINCT
+			TRIM(ma_so_thue_nguoi_ban),
+			TRIM(cong_ty),
+			?
+		FROM hoa_don
+		WHERE TRIM(COALESCE(ma_so_thue_nguoi_ban, '')) <> ''
+		  AND TRIM(COALESCE(cong_ty, '')) <> ''
+		ON DUPLICATE KEY UPDATE
+			ten_cong_ty = CASE
+				WHEN TRIM(COALESCE(company_contacts.ten_cong_ty, '')) = '' THEN VALUES(ten_cong_ty)
+				ELSE company_contacts.ten_cong_ty
+			END,
+			gmail = CASE
+				WHEN TRIM(COALESCE(company_contacts.gmail, '')) = '' THEN VALUES(gmail)
+				ELSE company_contacts.gmail
+			END
+	`, normalizedDefaultEmail); err != nil {
+		return fmt.Errorf("error syncing company contacts from hoa_don: %w", err)
+	}
+
 	return nil
 }
 
@@ -89,7 +141,7 @@ func (r *CompanyContactRepository) EnsureContactTx(tx *sql.Tx, companyName, taxI
 		return sql.NullInt64{}, strings.TrimSpace(contact.Email), nil
 	}
 
-	return sql.NullInt64{}, DefaultCompanyContactEmail, nil
+	return sql.NullInt64{}, ResolveDefaultCompanyContactEmail(), nil
 }
 
 func (r *CompanyContactRepository) backfillOrderEmails(tableName string) error {
@@ -107,7 +159,7 @@ func (r *CompanyContactRepository) backfillOrderEmails(tableName string) error {
 			ON LOWER(TRIM(o.nha_thau)) = LOWER(TRIM(c.ten_cong_ty))
 		SET o.email = COALESCE(NULLIF(TRIM(c.gmail), ''), ?)
 		WHERE TRIM(COALESCE(o.nha_thau, '')) <> ''
-	`, tableName), DefaultCompanyContactEmail); err != nil {
+	`, tableName), ResolveDefaultCompanyContactEmail()); err != nil {
 		return fmt.Errorf("error backfilling %s company emails: %w", tableName, err)
 	}
 
@@ -202,7 +254,72 @@ func (r *CompanyContactRepository) Search(keyword string, limit int) ([]CompanyC
 }
 
 func (r *CompanyContactRepository) GetByID(id int64) (*CompanyContact, error) {
-	return nil, nil
+	if id <= 0 {
+		return nil, nil
+	}
+
+	query := `
+		SELECT
+			ma_so_thue,
+			ten_cong_ty,
+			COALESCE(so_hd, ''),
+			COALESCE(DATE_FORMAT(ngay_hd, '%Y-%m-%d'), ''),
+			COALESCE(dia_chi_cong_ty, ''),
+			COALESCE(so_tk_ngan_hang, ''),
+			COALESCE(ten_ngan_hang, ''),
+			COALESCE(chi_nhanh, ''),
+			COALESCE(qd, ''),
+			COALESCE(so_goi_thau, ''),
+			COALESCE(gmail, '')
+		FROM company_contacts
+		WHERE ma_so_thue = ?
+		LIMIT 1
+	`
+
+	contact, err := scanCompanyContact(r.DB.QueryRow(query, strconv.FormatInt(id, 10)))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("error loading company contact by id: %w", err)
+	}
+
+	return contact, nil
+}
+
+func (r *CompanyContactRepository) GetByTaxID(taxID string) (*CompanyContact, error) {
+	normalizedTaxID := strings.TrimSpace(taxID)
+	if normalizedTaxID == "" {
+		return nil, nil
+	}
+
+	query := `
+		SELECT
+			ma_so_thue,
+			ten_cong_ty,
+			COALESCE(so_hd, ''),
+			COALESCE(DATE_FORMAT(ngay_hd, '%Y-%m-%d'), ''),
+			COALESCE(dia_chi_cong_ty, ''),
+			COALESCE(so_tk_ngan_hang, ''),
+			COALESCE(ten_ngan_hang, ''),
+			COALESCE(chi_nhanh, ''),
+			COALESCE(qd, ''),
+			COALESCE(so_goi_thau, ''),
+			COALESCE(gmail, '')
+		FROM company_contacts
+		WHERE ma_so_thue = ?
+		LIMIT 1
+	`
+
+	contact, err := scanCompanyContact(r.DB.QueryRow(query, normalizedTaxID))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("error loading company contact by tax id: %w", err)
+	}
+
+	return contact, nil
 }
 
 func (r *CompanyContactRepository) GetByCompanyName(companyName string) (*CompanyContact, error) {
@@ -230,25 +347,89 @@ func (r *CompanyContactRepository) getByCompanyNameTx(tx *sql.Tx, companyName st
 			COALESCE(gmail, '')
 		FROM company_contacts
 		WHERE LOWER(TRIM(ten_cong_ty)) = ?
-		LIMIT 1
+		ORDER BY ma_so_thue ASC
 	`
 
-	var row scanner
+	var (
+		rows *sql.Rows
+		err  error
+	)
 	if tx != nil {
-		row = tx.QueryRow(query, normalizedName)
+		rows, err = tx.Query(query, normalizedName)
 	} else {
-		row = r.DB.QueryRow(query, normalizedName)
-	}
-
-	contact, err := scanCompanyContact(row)
-	if err == sql.ErrNoRows {
-		return nil, nil
+		rows, err = r.DB.Query(query, normalizedName)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("error loading company contact by name: %w", err)
 	}
+	defer rows.Close()
 
-	return contact, nil
+	matches := make([]CompanyContact, 0, 2)
+	for rows.Next() {
+		contact, err := scanCompanyContact(rows)
+		if err != nil {
+			return nil, fmt.Errorf("error scanning company contact by name: %w", err)
+		}
+		matches = append(matches, *contact)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating company contact by name: %w", err)
+	}
+
+	return selectCompanyContactByNameMatches(matches), nil
+}
+
+func selectCompanyContactByNameMatches(matches []CompanyContact) *CompanyContact {
+	if len(matches) == 0 {
+		return nil
+	}
+
+	selected := matches[0]
+	if len(matches) == 1 {
+		return &selected
+	}
+
+	uniqueTaxIDs := make(map[string]struct{}, len(matches))
+	sharedEmail := ""
+	emailConflict := false
+
+	for index, match := range matches {
+		if taxID := strings.TrimSpace(match.MaSoThue); taxID != "" {
+			uniqueTaxIDs[taxID] = struct{}{}
+		}
+
+		email := normalizeCompanyEmail(match.Email)
+		if index == 0 {
+			sharedEmail = email
+			continue
+		}
+
+		if email != sharedEmail {
+			emailConflict = true
+		}
+	}
+
+	if len(uniqueTaxIDs) <= 1 {
+		return &selected
+	}
+
+	// Multiple tax IDs share the same normalized company name.
+	// Keep a shared email only when every duplicate resolves to the same address,
+	// but avoid binding an arbitrary company_contact_id/tax ID.
+	selected.MaSoThue = ""
+	selected.ID = ""
+	selected.IdentityKey = buildCompanyIdentityKey(selected.TenCongTy, "")
+	selected.TaxID = ""
+
+	if emailConflict {
+		selected.Gmail = ""
+		selected.Email = ""
+	} else {
+		selected.Gmail = sharedEmail
+		selected.Email = sharedEmail
+	}
+
+	return &selected
 }
 
 type scanner interface {
@@ -274,7 +455,7 @@ func scanCompanyContact(row scanner) (*CompanyContact, error) {
 	}
 
 	if contact.Gmail == "" {
-		contact.Gmail = DefaultCompanyContactEmail
+		contact.Gmail = ResolveDefaultCompanyContactEmail()
 	}
 
 	contact.ID = contact.MaSoThue

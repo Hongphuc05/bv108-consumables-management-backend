@@ -21,7 +21,7 @@ type InvoiceReconciliationRecord struct {
 	ID                      int64      `json:"id"`
 	OrderHistoryID          int64      `json:"orderHistoryId"`
 	OrderBatchKey           string     `json:"orderBatchKey"`
-	CompanyContactID *string     `json:"companyContactId,omitempty"`
+	CompanyContactID        *string    `json:"companyContactId,omitempty"`
 	NhaThau                 string     `json:"nhaThau"`
 	MaQuanLy                string     `json:"maQuanLy"`
 	MaVtytCu                string     `json:"maVtytCu"`
@@ -31,7 +31,7 @@ type InvoiceReconciliationRecord struct {
 	InvoiceNumber           string     `json:"invoiceNumber"`
 	InvoiceIDHoaDon         string     `json:"invoiceIdHoaDon,omitempty"`
 	InvoiceRowID            *int64     `json:"invoiceRowId,omitempty"`
-	InvoiceCompanyContactID *string     `json:"invoiceCompanyContactId,omitempty"`
+	InvoiceCompanyContactID *string    `json:"invoiceCompanyContactId,omitempty"`
 	InvoiceCompanyName      string     `json:"invoiceCompanyName,omitempty"`
 	InvoiceItemCode         string     `json:"invoiceItemCode,omitempty"`
 	InvoiceItemName         string     `json:"invoiceItemName,omitempty"`
@@ -55,7 +55,7 @@ type InvoiceReconciliationRecord struct {
 type UpsertInvoiceReconciliationInput struct {
 	OrderHistoryID          int64
 	OrderBatchKey           string
-	CompanyContactID *string
+	CompanyContactID        *string
 	NhaThau                 string
 	MaQuanLy                string
 	MaVtytCu                string
@@ -183,7 +183,129 @@ func (r *InvoiceReconciliationRepository) UpsertBulk(inputs []UpsertInvoiceRecon
 		return nil
 	}
 
-	return fmt.Errorf("invoice reconciliation upsert is disabled; use UpdateNotesBulk or UpdateStatusesBulk")
+	tx, err := r.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("error starting invoice reconciliation upsert transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	statement := `
+		INSERT INTO order_invoice_reconciliation (
+			order_history_id,
+			order_batch_key,
+			company_contact_id,
+			nha_thau,
+			ma_quan_ly,
+			ma_vtyt_cu,
+			ten_vtyt_bv,
+			ordered_qty,
+			order_time,
+			invoice_number,
+			invoice_id_hoa_don,
+			invoice_row_id,
+			invoice_company_contact_id,
+			invoice_company_name,
+			invoice_item_code,
+			invoice_item_name,
+			invoice_qty,
+			invoice_time,
+			has_invoice,
+			detail_status,
+			detail_note,
+			match_score,
+			quantity_diff,
+			matched_by_user_id,
+			matched_by_username,
+			matched_by_email,
+			matched_at,
+			note,
+			status
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			company_contact_id = VALUES(company_contact_id),
+			nha_thau = VALUES(nha_thau),
+			ma_quan_ly = VALUES(ma_quan_ly),
+			ma_vtyt_cu = VALUES(ma_vtyt_cu),
+			ten_vtyt_bv = VALUES(ten_vtyt_bv),
+			ordered_qty = VALUES(ordered_qty),
+			order_time = VALUES(order_time),
+			invoice_id_hoa_don = VALUES(invoice_id_hoa_don),
+			invoice_row_id = VALUES(invoice_row_id),
+			invoice_company_contact_id = VALUES(invoice_company_contact_id),
+			invoice_company_name = VALUES(invoice_company_name),
+			invoice_item_code = VALUES(invoice_item_code),
+			invoice_item_name = VALUES(invoice_item_name),
+			invoice_qty = VALUES(invoice_qty),
+			invoice_time = VALUES(invoice_time),
+			has_invoice = VALUES(has_invoice),
+			detail_status = VALUES(detail_status),
+			detail_note = VALUES(detail_note),
+			match_score = VALUES(match_score),
+			quantity_diff = VALUES(quantity_diff),
+			matched_by_user_id = VALUES(matched_by_user_id),
+			matched_by_username = VALUES(matched_by_username),
+			matched_by_email = VALUES(matched_by_email),
+			matched_at = VALUES(matched_at),
+			updated_at = CURRENT_TIMESTAMP
+	`
+
+	for _, input := range inputs {
+		if input.OrderHistoryID <= 0 {
+			continue
+		}
+
+		matchedAt := input.MatchedAt
+		if matchedAt.IsZero() {
+			matchedAt = time.Now().UTC()
+		}
+
+		status := normalizeInvoiceReconciliationStatus(input.Status)
+		if status == "" {
+			status = InvoiceReconciliationStatusPending
+		}
+
+		if _, err := tx.Exec(
+			statement,
+			input.OrderHistoryID,
+			strings.TrimSpace(input.OrderBatchKey),
+			nullableStringValue(input.CompanyContactID),
+			strings.TrimSpace(input.NhaThau),
+			strings.TrimSpace(input.MaQuanLy),
+			strings.TrimSpace(input.MaVtytCu),
+			strings.TrimSpace(input.TenVtytBv),
+			input.OrderedQty,
+			nullableTimeValue(input.OrderTime),
+			strings.TrimSpace(input.InvoiceNumber),
+			strings.TrimSpace(input.InvoiceIDHoaDon),
+			nullableInt64Value(input.InvoiceRowID),
+			nullableStringValue(input.InvoiceCompanyContactID),
+			strings.TrimSpace(input.InvoiceCompanyName),
+			strings.TrimSpace(input.InvoiceItemCode),
+			strings.TrimSpace(input.InvoiceItemName),
+			input.InvoiceQty,
+			nullableTimeValue(input.InvoiceTime),
+			boolToTinyInt(input.HasInvoice),
+			strings.TrimSpace(input.DetailStatus),
+			strings.TrimSpace(input.DetailNote),
+			input.MatchScore,
+			input.QuantityDiff,
+			nullableInt64Value(input.MatchedByUserID),
+			strings.TrimSpace(input.MatchedByUsername),
+			strings.TrimSpace(input.MatchedByEmail),
+			matchedAt,
+			strings.TrimSpace(input.Note),
+			status,
+		); err != nil {
+			return fmt.Errorf("error upserting invoice reconciliation: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("error committing invoice reconciliation upsert transaction: %w", err)
+	}
+
+	return nil
 }
 
 func (r *InvoiceReconciliationRepository) ListByMonthYear(month, year int) ([]InvoiceReconciliationRecord, error) {
@@ -223,8 +345,10 @@ func (r *InvoiceReconciliationRepository) ListByMonthYear(month, year int) ([]In
 			status
 		FROM order_invoice_reconciliation
 		WHERE has_invoice = 1 AND status IN (?, ?)
+			AND MONTH(COALESCE(invoice_time, matched_at)) = ?
+			AND YEAR(COALESCE(invoice_time, matched_at)) = ?
 		ORDER BY updated_at DESC, matched_at DESC, id DESC
-	`, InvoiceReconciliationStatusDone, invoiceReconciliationLegacyStatusDone)
+	`, InvoiceReconciliationStatusDone, invoiceReconciliationLegacyStatusDone, month, year)
 	if err != nil {
 		return nil, fmt.Errorf("error listing invoice reconciliation history: %w", err)
 	}
@@ -601,6 +725,13 @@ func nullableInt64Value(value *int64) interface{} {
 		return nil
 	}
 	return *value
+}
+
+func nullableStringValue(value *string) interface{} {
+	if value == nil {
+		return nil
+	}
+	return strings.TrimSpace(*value)
 }
 
 func nullableTimeValue(value *time.Time) interface{} {

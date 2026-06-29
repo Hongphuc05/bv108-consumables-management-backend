@@ -21,6 +21,17 @@ type currentUserCacheEntry struct {
 
 var currentUserCache sync.Map
 
+func loadActiveUserByID(userRepo *models.UserRepository, userID int64) (*models.User, error) {
+	user, err := userRepo.GetByID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if !user.IsActive {
+		return nil, fmt.Errorf("user account is disabled")
+	}
+	return user, nil
+}
+
 func getCurrentUserFromAuthorizationHeader(c *gin.Context, userRepo *models.UserRepository, jwtSecret []byte) (*models.UserProfile, error) {
 	userID, err := getUserIDFromAuthorizationHeader(c, jwtSecret)
 	if err != nil {
@@ -37,7 +48,7 @@ func getCurrentUserFromAuthorizationHeader(c *gin.Context, userRepo *models.User
 		currentUserCache.Delete(userID)
 	}
 
-	user, err := userRepo.GetByID(userID)
+	user, err := loadActiveUserByID(userRepo, userID)
 	if err != nil {
 		return nil, err
 	}

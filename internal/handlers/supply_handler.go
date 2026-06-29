@@ -91,6 +91,18 @@ func shouldRestrictSupplyVisibilityByAssignment(role string) bool {
 	}
 }
 
+func (h *SupplyHandler) requireAuthenticatedRequester(c *gin.Context) bool {
+	if _, err := getCurrentUserFromAuthorizationHeader(c, h.userRepo, h.jwtSecret); err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Error:   "UNAUTHORIZED",
+			Message: "Yêu cầu đăng nhập hợp lệ",
+		})
+		return false
+	}
+
+	return true
+}
+
 // PaginationResponse represents a paginated response
 type PaginationResponse struct {
 	Data       interface{} `json:"data"`
@@ -375,6 +387,10 @@ func (h *SupplyHandler) GetLowStockSupplies(c *gin.Context) {
 
 // GetCompareCatalog returns paginated rows from so_sanh_vat_tu for selection list.
 func (h *SupplyHandler) GetCompareCatalog(c *gin.Context) {
+	if !h.requireAuthenticatedRequester(c) {
+		return
+	}
+
 	keyword := strings.TrimSpace(c.Query("keyword"))
 	level1Filter := strings.TrimSpace(c.Query("level1Filter"))
 	level2Filter := strings.TrimSpace(c.Query("level2Filter"))
@@ -402,6 +418,10 @@ func (h *SupplyHandler) GetCompareCatalog(c *gin.Context) {
 
 // GetCompareLevel1Options returns distinct level 1 values from ma_thong_tu_04.
 func (h *SupplyHandler) GetCompareLevel1Options(c *gin.Context) {
+	if !h.requireAuthenticatedRequester(c) {
+		return
+	}
+
 	groups, err := h.repo.GetCompareLevel1Options()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
@@ -419,6 +439,10 @@ func (h *SupplyHandler) GetCompareLevel1Options(c *gin.Context) {
 
 // GetCompareLevel2Options returns level 2 values (last 3 chars) from ma_thong_tu_04.
 func (h *SupplyHandler) GetCompareLevel2Options(c *gin.Context) {
+	if !h.requireAuthenticatedRequester(c) {
+		return
+	}
+
 	level1 := strings.TrimSpace(c.Query("level1"))
 	groups, err := h.repo.GetCompareLevel2Options(level1)
 	if err != nil {
@@ -437,6 +461,10 @@ func (h *SupplyHandler) GetCompareLevel2Options(c *gin.Context) {
 
 // CompareSupplies returns selected comparison rows by ma_thu_vien.
 func (h *SupplyHandler) CompareSupplies(c *gin.Context) {
+	if !h.requireAuthenticatedRequester(c) {
+		return
+	}
+
 	var req CompareRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{

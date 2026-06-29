@@ -29,9 +29,10 @@ const (
 )
 
 type AuthHandler struct {
-	userRepo        *models.UserRepository
-	jwtSecret       []byte
-	jwtExpiresHours int
+	userRepo          *models.UserRepository
+	jwtSecret         []byte
+	jwtExpiresHours   int
+	jwtExpiresMinutes int
 }
 
 type RegisterRequest struct {
@@ -75,11 +76,12 @@ func (e *statusError) Error() string {
 	return e.message
 }
 
-func NewAuthHandler(userRepo *models.UserRepository, jwtSecret string, jwtExpiresHours int) *AuthHandler {
+func NewAuthHandler(userRepo *models.UserRepository, jwtSecret string, jwtExpiresHours int, jwtExpiresMinutes int) *AuthHandler {
 	return &AuthHandler{
-		userRepo:        userRepo,
-		jwtSecret:       []byte(jwtSecret),
-		jwtExpiresHours: jwtExpiresHours,
+		userRepo:          userRepo,
+		jwtSecret:         []byte(jwtSecret),
+		jwtExpiresHours:   jwtExpiresHours,
+		jwtExpiresMinutes: jwtExpiresMinutes,
 	}
 }
 
@@ -263,10 +265,14 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userRepo.GetByID(userID)
+	user, err := loadActiveUserByID(h.userRepo, userID)
 	if err != nil {
 		if err.Error() == "user not found" {
 			c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "User not found"})
+			return
+		}
+		if err.Error() == "user account is disabled" {
+			c.JSON(http.StatusForbidden, ErrorResponse{Error: "ACCOUNT_DISABLED", Message: "User account is disabled"})
 			return
 		}
 
@@ -296,6 +302,8 @@ func (h *AuthHandler) ListManagedUsers(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
 		return
 	}
+
+	users = filterManagedUserProfiles(currentUser.Role, users)
 
 	c.JSON(http.StatusOK, gin.H{
 		"users": users,
@@ -334,6 +342,31 @@ func (h *AuthHandler) UpdateManagedUserRole(c *gin.Context) {
 	req.Role = strings.ToLower(strings.TrimSpace(req.Role))
 	if !isAssignableRole(req.Role) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_ROLE", Message: "Role must be one of: admin, chi_huy_khoa, nhan_vien_kho, thu_kho, nhan_vien_ke_toan, nhan_vien_thau"})
+		return
+	}
+
+	targetUser, err := loadActiveUserByID(h.userRepo, userID)
+	if err != nil {
+		if err.Error() == "user not found" {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "User not found"})
+			return
+		}
+		if err.Error() == "user account is disabled" {
+			c.JSON(http.StatusForbidden, ErrorResponse{Error: "ACCOUNT_DISABLED", Message: "User account is disabled"})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	if !canManageTargetUserRole(currentUser.Role, targetUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "You do not have permission to manage this account"})
+		return
+	}
+
+	if !canAssignManagedRole(currentUser.Role, req.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "You do not have permission to assign this role"})
 		return
 	}
 
@@ -379,6 +412,26 @@ func (h *AuthHandler) DeleteManagedUser(c *gin.Context) {
 		return
 	}
 
+	targetUser, err := loadActiveUserByID(h.userRepo, userID)
+	if err != nil {
+		if err.Error() == "user not found" {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "User not found"})
+			return
+		}
+		if err.Error() == "user account is disabled" {
+			c.JSON(http.StatusForbidden, ErrorResponse{Error: "ACCOUNT_DISABLED", Message: "User account is disabled"})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	if !canManageTargetUserRole(currentUser.Role, targetUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "You do not have permission to delete this account"})
+		return
+	}
+
 	if err := h.userRepo.DeactivateByID(userID); err != nil {
 		if err.Error() == "user not found" {
 			c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "User not found"})
@@ -398,7 +451,14 @@ func (h *AuthHandler) DeleteManagedUser(c *gin.Context) {
 
 func (h *AuthHandler) generateToken(user *models.User) (string, time.Time, error) {
 	issuedAt := time.Now()
-	expiresAt := issuedAt.Add(time.Duration(h.jwtExpiresHours) * time.Hour)
+	expiresIn := time.Duration(h.jwtExpiresMinutes) * time.Minute
+	if expiresIn <= 0 {
+		expiresIn = time.Duration(h.jwtExpiresHours) * time.Hour
+	}
+	if expiresIn <= 0 {
+		expiresIn = 8 * time.Hour
+	}
+	expiresAt := issuedAt.Add(expiresIn)
 
 	claims := jwt.MapClaims{
 		"sub":      user.ID,
@@ -445,6 +505,9 @@ func (h *AuthHandler) ensureCanCreateUser(c *gin.Context, requestedRole string) 
 		if !isAccountCreatorRole(requestingUser.Role) {
 			return &statusError{status: http.StatusForbidden, message: createAccountMessage}
 		}
+		if !canAssignManagedRole(requestingUser.Role, requestedRole) {
+			return &statusError{status: http.StatusForbidden, message: "You do not have permission to create an account with this role"}
+		}
 		return nil
 	}
 
@@ -469,7 +532,7 @@ func (h *AuthHandler) getCurrentUser(c *gin.Context) (*models.User, error) {
 		return nil, err
 	}
 
-	return h.userRepo.GetByID(userID)
+	return loadActiveUserByID(h.userRepo, userID)
 }
 
 func (h *AuthHandler) getUserIDFromAuthorizationHeader(c *gin.Context) (int64, error) {
