@@ -345,8 +345,8 @@ func (r *InvoiceReconciliationRepository) ListByMonthYear(month, year int) ([]In
 			status
 		FROM order_invoice_reconciliation
 		WHERE has_invoice = 1 AND status IN (?, ?)
-			AND MONTH(COALESCE(invoice_time, matched_at)) = ?
-			AND YEAR(COALESCE(invoice_time, matched_at)) = ?
+			AND MONTH(matched_at) = ?
+			AND YEAR(matched_at) = ?
 		ORDER BY updated_at DESC, matched_at DESC, id DESC
 	`, InvoiceReconciliationStatusDone, invoiceReconciliationLegacyStatusDone, month, year)
 	if err != nil {

@@ -1,8 +1,17 @@
 package handlers
 
-func canManageInvoiceWorkflowRole(role string) bool {
+func canViewInvoiceWorkflowRole(role string) bool {
 	switch normalizeRoleForPermissions(role) {
-	case RoleAdmin, RoleChiHuyKhoa, RoleNhanVienKeToan:
+	case RoleAdmin, RoleChiHuyKhoa, RoleNhanVienKho, RoleThuKho, RoleNhanVienKeToan, RoleNhanVienThau:
+		return true
+	default:
+		return false
+	}
+}
+
+func canEditInvoiceWorkflowRole(role string) bool {
+	switch normalizeRoleForPermissions(role) {
+	case RoleThuKho:
 		return true
 	default:
 		return false

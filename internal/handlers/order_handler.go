@@ -124,8 +124,8 @@ func (h *OrderHandler) UpsertInvoiceReconciliations(c *gin.Context) {
 		return
 	}
 
-	if !canManageInvoiceWorkflowRole(currentUser.Role) {
-		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin, Chi huy khoa, or Nhan vien ke toan can create invoice reconciliation records"})
+	if !canEditInvoiceWorkflowRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Thu kho can create invoice reconciliation records"})
 		return
 	}
 
@@ -208,8 +208,8 @@ func (h *OrderHandler) SaveInvoiceReconciliations(c *gin.Context) {
 		return
 	}
 
-	if !canManageInvoiceWorkflowRole(currentUser.Role) {
-		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin, Chi huy khoa, or Nhan vien ke toan can update invoice reconciliation"})
+	if !canEditInvoiceWorkflowRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Thu kho can update invoice reconciliation"})
 		return
 	}
 
@@ -332,8 +332,8 @@ func (h *OrderHandler) GetInvoiceReconciliationHistory(c *gin.Context) {
 		return
 	}
 
-	if !canManageInvoiceWorkflowRole(currentUser.Role) {
-		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin, Chi huy khoa, or Nhan vien ke toan can view invoice reconciliation history"})
+	if !canViewInvoiceWorkflowRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Authenticated users with a valid operational role can view invoice reconciliation history"})
 		return
 	}
 
@@ -370,8 +370,8 @@ func (h *OrderHandler) GetMatchedInvoiceNumbers(c *gin.Context) {
 		return
 	}
 
-	if !canManageInvoiceWorkflowRole(currentUser.Role) {
-		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin, Chi huy khoa, or Nhan vien ke toan can view matched invoices"})
+	if !canViewInvoiceWorkflowRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Authenticated users with a valid operational role can view matched invoices"})
 		return
 	}
 
@@ -422,8 +422,8 @@ func (h *OrderHandler) GetMatchedOrderReconciliations(c *gin.Context) {
 		return
 	}
 
-	if !canManageInvoiceWorkflowRole(currentUser.Role) {
-		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin, Chi huy khoa, or Nhan vien ke toan can view matched order reconciliations"})
+	if !canViewInvoiceWorkflowRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Authenticated users with a valid operational role can view matched order reconciliations"})
 		return
 	}
 

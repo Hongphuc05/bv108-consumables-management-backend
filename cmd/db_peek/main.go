@@ -73,6 +73,73 @@ func main() {
 	if err := rows.Err(); err != nil {
 		log.Fatalf("iterate reconciliation periods: %v", err)
 	}
+
+	fmt.Println("")
+	fmt.Println("Recent reconciliation records:")
+
+	recordRows, err := database.DB.Query(`
+		SELECT
+			id,
+			nha_thau,
+			has_invoice,
+			status,
+			invoice_number,
+			invoice_time,
+			matched_at,
+			updated_at,
+			COALESCE(note, '')
+		FROM order_invoice_reconciliation
+		ORDER BY updated_at DESC, matched_at DESC, id DESC
+		LIMIT 10
+	`)
+	if err != nil {
+		log.Fatalf("query reconciliation records: %v", err)
+	}
+	defer recordRows.Close()
+
+	for recordRows.Next() {
+		var (
+			id            int
+			nhaThau       string
+			hasInvoice    int
+			status        string
+			invoiceNumber string
+			invoiceTime   interface{}
+			matchedAt     interface{}
+			updatedAt     interface{}
+			note          string
+		)
+		if err := recordRows.Scan(
+			&id,
+			&nhaThau,
+			&hasInvoice,
+			&status,
+			&invoiceNumber,
+			&invoiceTime,
+			&matchedAt,
+			&updatedAt,
+			&note,
+		); err != nil {
+			log.Fatalf("scan reconciliation record: %v", err)
+		}
+
+		fmt.Printf(
+			"- id=%d supplier=%q has_invoice=%d status=%q invoice=%q invoice_time=%v matched_at=%v updated_at=%v note=%q\n",
+			id,
+			nhaThau,
+			hasInvoice,
+			status,
+			invoiceNumber,
+			invoiceTime,
+			matchedAt,
+			updatedAt,
+			note,
+		)
+	}
+
+	if err := recordRows.Err(); err != nil {
+		log.Fatalf("iterate reconciliation records: %v", err)
+	}
 }
 
 func runCount(label, query string) {
