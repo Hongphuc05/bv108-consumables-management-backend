@@ -239,6 +239,30 @@ func (r *UserRepository) UpdateRole(userID int64, role string) (*User, error) {
 	return r.GetByID(userID)
 }
 
+func (r *UserRepository) UpdatePassword(userID int64, passwordHash string) (*User, error) {
+	query := `
+		UPDATE users
+		SET password_hash = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`
+
+	result, err := r.DB.Exec(query, passwordHash, userID)
+	if err != nil {
+		return nil, fmt.Errorf("error updating user password: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("error getting affected rows: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	return r.GetByID(userID)
+}
+
 func (r *UserRepository) DeactivateByID(userID int64) error {
 	query := `
 		UPDATE users

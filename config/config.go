@@ -37,6 +37,10 @@ type Config struct {
 	InternalSupplySyncMinute        int
 	InternalSupplySyncTimezone      string
 	InternalSupplySyncRunOnStartup  bool
+	GeminiAPIKey                    string
+	GeminiModel                     string
+	GeminiWebSearch                 bool
+	GeminiMaxOutputTokens           int
 }
 
 var AppConfig *Config
@@ -77,6 +81,10 @@ func LoadConfig() error {
 		InternalSupplySyncMinute:        getEnvAsInt("INTERNAL_SUPPLY_SYNC_MINUTE", 0),
 		InternalSupplySyncTimezone:      getEnv("INTERNAL_SUPPLY_SYNC_TIMEZONE", "Asia/Bangkok"),
 		InternalSupplySyncRunOnStartup:  getEnvAsBool("INTERNAL_SUPPLY_SYNC_RUN_ON_STARTUP", false),
+		GeminiAPIKey:                    getEnv("GEMINI_API_KEY", ""),
+		GeminiModel:                     getEnv("GEMINI_MODEL", "gemini-2.5-flash-lite"),
+		GeminiWebSearch:                 getEnvAsBool("GEMINI_WEB_SEARCH", false),
+		GeminiMaxOutputTokens:           getEnvAsInt("GEMINI_MAX_OUTPUT_TOKENS", 4096),
 	}
 
 	return nil

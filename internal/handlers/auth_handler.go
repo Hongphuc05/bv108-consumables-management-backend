@@ -67,6 +67,10 @@ type UpdateManagedUserRoleRequest struct {
 	Role string `json:"role" binding:"required"`
 }
 
+type ResetManagedUserPasswordRequest struct {
+	Password string `json:"password" binding:"required"`
+}
+
 type statusError struct {
 	status  int
 	message string
@@ -446,6 +450,84 @@ func (h *AuthHandler) DeleteManagedUser(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "User deleted successfully",
+	})
+}
+
+func (h *AuthHandler) ResetManagedUserPassword(c *gin.Context) {
+	currentUser, err := getCurrentUserFromAuthorizationHeader(c, h.userRepo, h.jwtSecret)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !userHasAnyRole(currentUser, RoleAdmin) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only admin can reset account passwords"})
+		return
+	}
+
+	userID, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || userID <= 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_USER_ID", Message: "User ID is invalid"})
+		return
+	}
+
+	if userID == currentUser.ID {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_OPERATION", Message: "Cannot reset your own password from this screen"})
+		return
+	}
+
+	targetUser, err := loadActiveUserByID(h.userRepo, userID)
+	if err != nil {
+		if err.Error() == "user not found" {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "User not found"})
+			return
+		}
+		if err.Error() == "user account is disabled" {
+			c.JSON(http.StatusForbidden, ErrorResponse{Error: "ACCOUNT_DISABLED", Message: "User account is disabled"})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	if !canManageTargetUserRole(currentUser.Role, targetUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "You do not have permission to manage this account"})
+		return
+	}
+
+	var req ResetManagedUserPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "Invalid reset password payload"})
+		return
+	}
+
+	req.Password = strings.TrimSpace(req.Password)
+	if len(req.Password) < 6 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_PASSWORD", Message: "Password must be at least 6 characters"})
+		return
+	}
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "HASH_ERROR", Message: "Failed to hash password"})
+		return
+	}
+
+	if _, err := h.userRepo.UpdatePassword(userID, string(passwordHash)); err != nil {
+		if err.Error() == "user not found" {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "NOT_FOUND", Message: "User not found"})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
+		return
+	}
+
+	invalidateCurrentUserCache(userID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "User password reset successfully",
 	})
 }
 

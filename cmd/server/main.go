@@ -156,6 +156,13 @@ func main() {
 		userRepo,
 		config.AppConfig.JWTSecret,
 	)
+	geminiProxyService := services.NewGeminiProxyService(
+		config.AppConfig.GeminiAPIKey,
+		config.AppConfig.GeminiModel,
+		config.AppConfig.GeminiWebSearch,
+		config.AppConfig.GeminiMaxOutputTokens,
+	)
+	reportHandler := handlers.NewReportHandler(userRepo, config.AppConfig.JWTSecret, geminiProxyService)
 	backgroundCtx, cancelBackground := context.WithCancel(context.Background())
 	defer cancelBackground()
 	internalSupplySyncService.Start(backgroundCtx)
@@ -188,6 +195,7 @@ func main() {
 			auth.PUT("/profile", authHandler.UpdateProfile)
 			auth.GET("/users", authHandler.ListManagedUsers)
 			auth.PUT("/users/:id/role", authHandler.UpdateManagedUserRole)
+			auth.PUT("/users/:id/password", authHandler.ResetManagedUserPassword)
 			auth.DELETE("/users/:id", authHandler.DeleteManagedUser)
 		}
 
@@ -226,6 +234,8 @@ func main() {
 			hoaDon.POST("/refresh", refreshHandler.RefreshInvoices) // POST /api/hoa-don/refresh
 		}
 
+		api.GET("/export-to-vinmes", orderHandler.GetExportToVinmes)
+
 		orders := api.Group("/orders")
 		{
 			orders.GET("/pending", orderHandler.GetPendingOrders)
@@ -252,6 +262,11 @@ func main() {
 			forecastApprovals.GET("/monthly-history", forecastApprovalHandler.GetForecastMonthlyHistory)
 			forecastApprovals.POST("", forecastApprovalHandler.SaveForecastApproval)
 			forecastApprovals.POST("/bulk", forecastApprovalHandler.SaveForecastApprovalsBulk)
+		}
+
+		reports := api.Group("/reports")
+		{
+			reports.POST("/gemini-compare", reportHandler.GenerateGeminiCompare)
 		}
 	}
 
