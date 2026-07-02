@@ -136,28 +136,61 @@ type SupplyRepository struct {
 }
 
 type SupplyUpsertInput struct {
-	IDX1             int
-	ProductID        int
-	GroupName        string
-	ID               string
-	IDX2             string
-	MaHieu           string
-	TypeName         string
-	Name             string
-	Unit             string
-	QuyCachDongGoi   string
-	QuyCachGiaoHang  string
-	ThongTinThau     string
-	TongThau         string
-	HangSX           string
-	NuocSX           string
-	NhaCungCap       string
-	Price            float64
-	TonDauKy         int
-	NhapTrongKy      int
-	XuatTrongKy      int
-	TongNhap         int
-	TonKhoMin        int
+	IDX1            int
+	ProductID       int
+	GroupName       string
+	ID              string
+	IDX2            string
+	MaHieu          string
+	TypeName        string
+	Name            string
+	Unit            string
+	QuyCachDongGoi  string
+	QuyCachGiaoHang string
+	ThongTinThau    string
+	TongThau        string
+	HangSX          string
+	NuocSX          string
+	NhaCungCap      string
+	Price           float64
+	TonDauKy        int
+	NhapTrongKy     int
+	XuatTrongKy     int
+	TongNhap        int
+	TonKhoMin       int
+}
+
+type CompareSupplyReplaceInput struct {
+	STT                        int
+	TenCongTy                  string
+	MaThuVien                  string
+	MaThongTu04                string
+	TenVatTu                   string
+	TenThuongMai               string
+	TSKT2025                   string
+	TSKT2026                   string
+	ChatLieuVatLieu            string
+	DacTinhCauTao              string
+	KichThuoc                  string
+	ChieuDai                   string
+	TinhNangSuDung             string
+	TSKTKhac                   string
+	DVT                        string
+	SoLuongSuDung12Thang       float64
+	SoLuongTrungThau2025BoSung float64
+	DonGiaTrungThau2025        float64
+	DonGiaDeXuat2026           float64
+	KetQuaTrungThauThapNhat    float64
+	ThoiGianDangTaiThapNhat    string
+	KetQuaTrungThauCaoNhat     float64
+	ThoiGianDangTaiCaoNhat     string
+	MaSoThue                   string
+	MaHieu                     string
+	HangSX                     string
+	NuocSX                     string
+	NhomNuoc                   string
+	ChatLuong                  string
+	Ma5086                     string
 }
 
 const supplySelectColumns = `
@@ -591,6 +624,130 @@ func (r *SupplyRepository) GetCompareByLibraryCodes(maThuVien []string) ([]Compa
 	}
 
 	return items, nil
+}
+
+func (r *SupplyRepository) ListAllCompareSupplies() ([]CompareSupply, error) {
+	query := `
+		SELECT
+			stt, ten_cong_ty, ma_thu_vien, ma_thong_tu_04, ten_vat_tu,
+			ten_thuong_mai, tskt_2025, tskt_2026, chat_lieu_vat_lieu,
+			dac_tinh_cau_tao, kich_thuoc, chieu_dai, tinh_nang_su_dung, tskt_khac, dvt,
+			so_luong_su_dung_12_thang, so_luong_trung_thau_2025_bo_sung,
+			don_gia_trung_thau_2025, don_gia_de_xuat_2026,
+			ket_qua_trung_thau_thap_nhat, thoi_gian_don_vi_dang_tai_thap_nhat,
+			ket_qua_trung_thau_cao_nhat, thoi_gian_don_vi_dang_tai_cao_nhat,
+			ma_so_thue, ma_hieu, hangsx, nuoc_sx, nhom_nuoc, chat_luong,
+			ma_5086, created_at, updated_at
+		FROM so_sanh_vat_tu
+		ORDER BY stt, ma_thu_vien
+	`
+
+	rows, err := r.DB.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("error listing compare supplies: %w", err)
+	}
+	defer rows.Close()
+
+	items := []CompareSupply{}
+	for rows.Next() {
+		item, scanErr := scanCompareSupplyRow(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("error scanning compare row: %w", scanErr)
+		}
+		items = append(items, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating compare rows: %w", err)
+	}
+
+	return items, nil
+}
+
+func (r *SupplyRepository) ReplaceAllCompareSupplies(inputs []CompareSupplyReplaceInput) error {
+	tx, err := r.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("error starting compare supply replace transaction: %w", err)
+	}
+
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = tx.Exec("DELETE FROM so_sanh_vat_tu"); err != nil {
+		return fmt.Errorf("error clearing compare supplies: %w", err)
+	}
+
+	if len(inputs) == 0 {
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("error committing empty compare supply replace: %w", err)
+		}
+		return nil
+	}
+
+	insertSQL := `
+		INSERT INTO so_sanh_vat_tu (
+			stt, ten_cong_ty, ma_thu_vien, ma_thong_tu_04, ten_vat_tu,
+			ten_thuong_mai, tskt_2025, tskt_2026, chat_lieu_vat_lieu,
+			dac_tinh_cau_tao, kich_thuoc, chieu_dai, tinh_nang_su_dung, tskt_khac, dvt,
+			so_luong_su_dung_12_thang, so_luong_trung_thau_2025_bo_sung,
+			don_gia_trung_thau_2025, don_gia_de_xuat_2026,
+			ket_qua_trung_thau_thap_nhat, thoi_gian_don_vi_dang_tai_thap_nhat,
+			ket_qua_trung_thau_cao_nhat, thoi_gian_don_vi_dang_tai_cao_nhat,
+			ma_so_thue, ma_hieu, hangsx, nuoc_sx, nhom_nuoc, chat_luong, ma_5086
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	stmt, err := tx.Prepare(insertSQL)
+	if err != nil {
+		return fmt.Errorf("error preparing compare supply insert: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, input := range inputs {
+		if _, err = stmt.Exec(
+			input.STT,
+			input.TenCongTy,
+			input.MaThuVien,
+			input.MaThongTu04,
+			input.TenVatTu,
+			input.TenThuongMai,
+			input.TSKT2025,
+			input.TSKT2026,
+			input.ChatLieuVatLieu,
+			input.DacTinhCauTao,
+			input.KichThuoc,
+			input.ChieuDai,
+			input.TinhNangSuDung,
+			input.TSKTKhac,
+			input.DVT,
+			input.SoLuongSuDung12Thang,
+			input.SoLuongTrungThau2025BoSung,
+			input.DonGiaTrungThau2025,
+			input.DonGiaDeXuat2026,
+			input.KetQuaTrungThauThapNhat,
+			input.ThoiGianDangTaiThapNhat,
+			input.KetQuaTrungThauCaoNhat,
+			input.ThoiGianDangTaiCaoNhat,
+			input.MaSoThue,
+			input.MaHieu,
+			input.HangSX,
+			input.NuocSX,
+			input.NhomNuoc,
+			input.ChatLuong,
+			input.Ma5086,
+		); err != nil {
+			return fmt.Errorf("error inserting compare supply %q: %w", input.MaThuVien, err)
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("error committing compare supply replace: %w", err)
+	}
+
+	return nil
 }
 
 // GetForecastCatalog retrieves all supplies that might be included in a forecast (non-zero inventory activity).

@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"database/sql"
-	"encoding/csv"
 	"fmt"
 	"net/http"
 	"sort"
@@ -13,6 +12,7 @@ import (
 	"bv108-consumables-management-backend/internal/models"
 
 	"github.com/gin-gonic/gin"
+	"github.com/xuri/excelize/v2"
 )
 
 type SupplyTaskHandler struct {
@@ -38,6 +38,33 @@ type importSupplyAssignmentsItemRequest struct {
 
 type importSupplyAssignmentsRequest struct {
 	Items []importSupplyAssignmentsItemRequest `json:"items"`
+}
+
+var supplyTaskAssignmentExcelHeaders = []string{
+	"IDX1",
+	"PRODUCTID",
+	"GROUPNAME",
+	"ID",
+	"IDX2",
+	"MA_HIEU",
+	"TYPENAME",
+	"NAME",
+	"UNIT",
+	"QUY_CACH_DONG_GOI",
+	"QUY_CACH_GIAO_HANG",
+	"QUY_CACH_TOI_THIEU",
+	"THONG_TIN_THAU",
+	"TONGTHAU",
+	"HANGSX",
+	"NUOC_SX",
+	"NHA_CUNG_CAP",
+	"PRICE",
+	"TONDAUKY",
+	"NHAPTRONGKY",
+	"XUATTRONGKY",
+	"TONGNHAP",
+	"TON_KHO_MIN",
+	"id_thu_ki_phu_trach",
 }
 
 func NewSupplyTaskHandler(
@@ -259,52 +286,27 @@ func (h *SupplyTaskHandler) ExportAssignments(c *gin.Context) {
 		return
 	}
 
-	filename := fmt.Sprintf("phan-quyen-vat-tu-%s.csv", time.Now().Format("20060102-150405"))
-	c.Header("Content-Type", "text/csv; charset=utf-8")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	filename := fmt.Sprintf("phan-quyen-vat-tu-%s.xlsx", time.Now().Format("20060102-150405"))
+	workbook := excelize.NewFile()
+	sheetName := "phan_quyen_vat_tu"
+	workbook.SetSheetName(workbook.GetSheetName(0), sheetName)
 
-	writer := csv.NewWriter(c.Writer)
-	if _, err := c.Writer.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "WRITE_ERROR", Message: "Không thể ghi dữ liệu export"})
-		return
+	for colIndex, header := range supplyTaskAssignmentExcelHeaders {
+		cell, cellErr := excelize.CoordinatesToCellName(colIndex+1, 1)
+		if cellErr != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "WRITE_ERROR", Message: "Không thể tạo ô tiêu đề export"})
+			return
+		}
+		if err := workbook.SetCellValue(sheetName, cell, header); err != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "WRITE_ERROR", Message: "Không thể ghi tiêu đề file export"})
+			return
+		}
 	}
 
-	header := []string{
-		"IDX1",
-		"PRODUCTID",
-		"GROUPNAME",
-		"ID",
-		"IDX2",
-		"MA_HIEU",
-		"TYPENAME",
-		"NAME",
-		"UNIT",
-		"QUY_CACH_DONG_GOI",
-		"QUY_CACH_ GIAO_HANG",
-		"QUY_CACH_TOI_THIEU",
-		"THONG_TIN_THAU",
-		"TONGTHAU",
-		"HANGSX",
-		"NUOC_SX",
-		"NHA_CUNG_CAP",
-		"PRICE",
-		"TONDAUKY",
-		"NHAPTRONGKY",
-		"XUATTRONGKY",
-		"TONGNHAP",
-		"TON_KHO_MIN",
-		"id_thu_ki_phu_trach",
-	}
-
-	if err := writer.Write(header); err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "WRITE_ERROR", Message: "Không thể ghi tiêu đề file export"})
-		return
-	}
-
-	for _, row := range rows {
-		record := []string{
-			strconv.Itoa(row.IDX1),
-			formatNullInt32(row.ProductID),
+	for rowIndex, row := range rows {
+		record := []interface{}{
+			row.IDX1,
+			nullInt32Value(row.ProductID),
 			formatNullString(row.GroupName),
 			formatNullString(row.ID),
 			formatNullString(row.IDX2),
@@ -320,23 +322,31 @@ func (h *SupplyTaskHandler) ExportAssignments(c *gin.Context) {
 			formatNullString(row.HangSX),
 			formatNullString(row.NuocSX),
 			formatNullString(row.NhaCungCap),
-			formatNullFloat64(row.Price),
-			formatNullInt32(row.TonDauKy),
-			formatNullInt32(row.NhapTrongKy),
-			formatNullInt32(row.XuatTrongKy),
-			formatNullInt32(row.TongNhap),
-			formatNullInt32(row.TonKhoMin),
-			formatNullInt64(row.AssignedToUserID),
+			nullFloat64Value(row.Price),
+			nullInt32Value(row.TonDauKy),
+			nullInt32Value(row.NhapTrongKy),
+			nullInt32Value(row.XuatTrongKy),
+			nullInt32Value(row.TongNhap),
+			nullInt32Value(row.TonKhoMin),
+			nullInt64Value(row.AssignedToUserID),
 		}
 
-		if err := writer.Write(record); err != nil {
+		startCell, cellErr := excelize.CoordinatesToCellName(1, rowIndex+2)
+		if cellErr != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "WRITE_ERROR", Message: "Không thể tạo ô dữ liệu export"})
+			return
+		}
+		if err := workbook.SetSheetRow(sheetName, startCell, &record); err != nil {
 			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "WRITE_ERROR", Message: "Không thể ghi dữ liệu export"})
 			return
 		}
 	}
 
-	writer.Flush()
-	if err := writer.Error(); err != nil {
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	c.Header("Cache-Control", "no-store")
+
+	if err := workbook.Write(c.Writer); err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "WRITE_ERROR", Message: "Không thể hoàn tất file export"})
 		return
 	}
@@ -348,10 +358,98 @@ func (h *SupplyTaskHandler) ImportAssignments(c *gin.Context) {
 		return
 	}
 
-	var req importSupplyAssignmentsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "Payload import phân công không hợp lệ"})
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_FILE", Message: "Thiếu file Excel import phân công"})
 		return
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_FILE", Message: "Không mở được file Excel import phân công"})
+		return
+	}
+	defer file.Close()
+
+	workbook, err := excelize.OpenReader(file)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_FILE", Message: "File import phải là Excel .xlsx hợp lệ"})
+		return
+	}
+	defer workbook.Close()
+
+	sheetName := workbook.GetSheetName(0)
+	if strings.TrimSpace(sheetName) == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_FILE", Message: "File Excel không có sheet dữ liệu"})
+		return
+	}
+
+	rows, err := workbook.GetRows(sheetName)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_FILE", Message: "Không đọc được dữ liệu từ file Excel"})
+		return
+	}
+
+	if len(rows) < 2 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "EMPTY_IMPORT", Message: "File import không có dòng dữ liệu hợp lệ"})
+		return
+	}
+
+	headerRow := make([]string, len(supplyTaskAssignmentExcelHeaders))
+	for i := range supplyTaskAssignmentExcelHeaders {
+		if i < len(rows[0]) {
+			headerRow[i] = strings.TrimSpace(rows[0][i])
+		}
+	}
+
+	for i, expected := range supplyTaskAssignmentExcelHeaders {
+		if headerRow[i] != expected {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_TEMPLATE", Message: fmt.Sprintf("Header cột %d phải là %q", i+1, expected)})
+			return
+		}
+	}
+
+	req := importSupplyAssignmentsRequest{
+		Items: make([]importSupplyAssignmentsItemRequest, 0, len(rows)-1),
+	}
+
+	for rowIndex := 1; rowIndex < len(rows); rowIndex++ {
+		row := rows[rowIndex]
+		cells := make([]string, len(supplyTaskAssignmentExcelHeaders))
+		for i := range cells {
+			if i < len(row) {
+				cells[i] = strings.TrimSpace(row[i])
+			}
+		}
+
+		isEmpty := true
+		for _, cell := range cells {
+			if cell != "" {
+				isEmpty = false
+				break
+			}
+		}
+		if isEmpty {
+			continue
+		}
+
+		idx1, err := strconv.Atoi(cells[0])
+		if err != nil || idx1 <= 0 {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_SUPPLY", Message: fmt.Sprintf("Dòng %d có IDX1 không hợp lệ", rowIndex+1)})
+			return
+		}
+
+		nextItem := importSupplyAssignmentsItemRequest{IDX1: idx1}
+		if strings.TrimSpace(cells[23]) != "" {
+			userID, err := strconv.ParseInt(strings.TrimSpace(cells[23]), 10, 64)
+			if err != nil || userID <= 0 {
+				c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_USER", Message: fmt.Sprintf("Dòng %d có id_thu_ki_phu_trach không hợp lệ", rowIndex+1)})
+				return
+			}
+			nextItem.UserID = &userID
+		}
+
+		req.Items = append(req.Items, nextItem)
 	}
 
 	if len(req.Items) == 0 {
@@ -485,23 +583,23 @@ func formatNullString(value sql.NullString) string {
 	return value.String
 }
 
-func formatNullInt32(value sql.NullInt32) string {
+func nullInt32Value(value sql.NullInt32) interface{} {
 	if !value.Valid {
 		return ""
 	}
-	return strconv.FormatInt(int64(value.Int32), 10)
+	return value.Int32
 }
 
-func formatNullInt64(value sql.NullInt64) string {
+func nullInt64Value(value sql.NullInt64) interface{} {
 	if !value.Valid {
 		return ""
 	}
-	return strconv.FormatInt(value.Int64, 10)
+	return value.Int64
 }
 
-func formatNullFloat64(value sql.NullFloat64) string {
+func nullFloat64Value(value sql.NullFloat64) interface{} {
 	if !value.Valid {
 		return ""
 	}
-	return strconv.FormatFloat(value.Float64, 'f', -1, 64)
+	return value.Float64
 }

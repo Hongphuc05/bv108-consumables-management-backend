@@ -209,6 +209,8 @@ func main() {
 			supplies.GET("/compare-level1", supplyHandler.GetCompareLevel1Options) // GET /api/supplies/compare-level1
 			supplies.GET("/compare-level2", supplyHandler.GetCompareLevel2Options) // GET /api/supplies/compare-level2?level1=xxx
 			supplies.GET("/compare-catalog", supplyHandler.GetCompareCatalog)      // GET /api/supplies/compare-catalog?page=1&pageSize=20&keyword=xxx&level1Filter=xxx&level2Filter=yyy
+			supplies.GET("/compare-export", supplyHandler.ExportCompareCatalogExcel)
+			supplies.POST("/compare-import", supplyHandler.ImportCompareCatalogExcel)
 			supplies.GET("/forecast-catalog", supplyHandler.GetForecastCatalog)
 			supplies.POST("/internal-sync", internalSupplySyncHandler.SyncNow)
 			supplies.POST("/compare", supplyHandler.CompareSupplies) // POST /api/supplies/compare

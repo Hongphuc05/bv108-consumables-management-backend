@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -9,6 +11,7 @@ import (
 	"bv108-consumables-management-backend/internal/models"
 
 	"github.com/gin-gonic/gin"
+	"github.com/xuri/excelize/v2"
 )
 
 type SupplyHandler struct {
@@ -23,6 +26,39 @@ const (
 	defaultPageSize = 20
 	maxPageSize     = 10000
 )
+
+var compareSupplyExcelHeaders = []string{
+	"STT",
+	"Tên công ty",
+	"Mã thư viện",
+	"Mã Thông tư 04",
+	"Tên vật tư",
+	"Tên thương mại",
+	"TSKT 2025",
+	"TSKT 2026",
+	"Chất liệu/ Vật liệu",
+	"Đặc tính/Cấu tạo",
+	"Kích thước",
+	"Chiều dài",
+	"Tính năng sử dụng",
+	"TSKT khác",
+	"ĐVT",
+	"Số lượng sử dụng 12 tháng",
+	"Số lượng trúng thầu 2025 + bổ sung",
+	"Đơn giá trúng thầu năm 2025",
+	"Đơn giá đề xuất năm 2026",
+	"KQ trúng thầu THẤP NHẤT",
+	"TG/ĐV đăng tải giá THẤP NHẤT",
+	"KQ trúng thầu CAO NHẤT",
+	"TG/ĐV đăng tải giá CAO NHẤT",
+	"Mã số thuế",
+	"Mã hiệu",
+	"Hãng sản xuất",
+	"Nước sản xuất",
+	"Nhóm nước",
+	"Chất lượng",
+	"Mã 5086",
+}
 
 // NewSupplyHandler creates a new supply handler
 func NewSupplyHandler(
@@ -101,6 +137,33 @@ func (h *SupplyHandler) requireAuthenticatedRequester(c *gin.Context) bool {
 	}
 
 	return true
+}
+
+func (h *SupplyHandler) getAuthenticatedRequester(c *gin.Context) (*models.UserProfile, bool) {
+	currentUser, err := getCurrentUserFromAuthorizationHeader(c, h.userRepo, h.jwtSecret)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Error:   "UNAUTHORIZED",
+			Message: "Yêu cầu đăng nhập hợp lệ",
+		})
+		return nil, false
+	}
+
+	return currentUser, true
+}
+
+func nullableStringValue(value sql.NullString) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
+}
+
+func nullableFloatValue(value sql.NullFloat64) float64 {
+	if !value.Valid {
+		return 0
+	}
+	return value.Float64
 }
 
 // PaginationResponse represents a paginated response
@@ -382,6 +445,340 @@ func (h *SupplyHandler) GetLowStockSupplies(c *gin.Context) {
 		PageSize:   pageSize,
 		Total:      total,
 		TotalPages: totalPages,
+	})
+}
+
+func (h *SupplyHandler) ExportCompareCatalogExcel(c *gin.Context) {
+	if !h.requireAuthenticatedRequester(c) {
+		return
+	}
+
+	items, err := h.repo.ListAllCompareSupplies()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error:   "DATABASE_ERROR",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	workbook := excelize.NewFile()
+	sheetName := "so_sanh_vat_tu"
+	workbook.SetSheetName(workbook.GetSheetName(0), sheetName)
+
+	for colIndex, header := range compareSupplyExcelHeaders {
+		cell, cellErr := excelize.CoordinatesToCellName(colIndex+1, 1)
+		if cellErr != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Error:   "EXPORT_ERROR",
+				Message: cellErr.Error(),
+			})
+			return
+		}
+		if setErr := workbook.SetCellValue(sheetName, cell, header); setErr != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Error:   "EXPORT_ERROR",
+				Message: setErr.Error(),
+			})
+			return
+		}
+	}
+
+	for rowIndex, item := range items {
+		row := []interface{}{
+			item.STT,
+			nullableStringValue(item.TenCongTy),
+			nullableStringValue(item.MaThuVien),
+			nullableStringValue(item.MaThongTu04),
+			nullableStringValue(item.TenVatTu),
+			nullableStringValue(item.TenThuongMai),
+			nullableStringValue(item.TSKT2025),
+			nullableStringValue(item.TSKT2026),
+			nullableStringValue(item.ChatLieuVatLieu),
+			nullableStringValue(item.DacTinhCauTao),
+			nullableStringValue(item.KichThuoc),
+			nullableStringValue(item.ChieuDai),
+			nullableStringValue(item.TinhNangSuDung),
+			nullableStringValue(item.TSKTKhac),
+			nullableStringValue(item.DVT),
+			nullableFloatValue(item.SoLuongSuDung12Thang),
+			nullableFloatValue(item.SoLuongTrungThau2025BoSung),
+			nullableFloatValue(item.DonGiaTrungThau2025),
+			nullableFloatValue(item.DonGiaDeXuat2026),
+			nullableFloatValue(item.KetQuaTrungThauThapNhat),
+			nullableStringValue(item.ThoiGianDangTaiThapNhat),
+			nullableFloatValue(item.KetQuaTrungThauCaoNhat),
+			nullableStringValue(item.ThoiGianDangTaiCaoNhat),
+			nullableStringValue(item.MaSoThue),
+			nullableStringValue(item.MaHieu),
+			nullableStringValue(item.HangSX),
+			nullableStringValue(item.NuocSX),
+			nullableStringValue(item.NhomNuoc),
+			nullableStringValue(item.ChatLuong),
+			nullableStringValue(item.Ma5086),
+		}
+
+		startCell, cellErr := excelize.CoordinatesToCellName(1, rowIndex+2)
+		if cellErr != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Error:   "EXPORT_ERROR",
+				Message: cellErr.Error(),
+			})
+			return
+		}
+		if setErr := workbook.SetSheetRow(sheetName, startCell, &row); setErr != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Error:   "EXPORT_ERROR",
+				Message: setErr.Error(),
+			})
+			return
+		}
+	}
+
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", `attachment; filename="so-sanh-vat-tu-template.xlsx"`)
+	c.Header("Cache-Control", "no-store")
+
+	if err := workbook.Write(c.Writer); err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error:   "EXPORT_ERROR",
+			Message: err.Error(),
+		})
+		return
+	}
+}
+
+func (h *SupplyHandler) ImportCompareCatalogExcel(c *gin.Context) {
+	currentUser, ok := h.getAuthenticatedRequester(c)
+	if !ok {
+		return
+	}
+
+	if !userHasAnyRole(currentUser, RoleAdmin, RoleChiHuyKhoa) {
+		c.JSON(http.StatusForbidden, ErrorResponse{
+			Error:   "FORBIDDEN",
+			Message: "Chỉ Admin hoặc Chỉ huy khoa mới có quyền import thay thế dữ liệu so sánh",
+		})
+		return
+	}
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error:   "INVALID_FILE",
+			Message: "Thiếu file Excel import",
+		})
+		return
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error:   "INVALID_FILE",
+			Message: "Không mở được file Excel import",
+		})
+		return
+	}
+	defer file.Close()
+
+	workbook, err := excelize.OpenReader(file)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error:   "INVALID_FILE",
+			Message: "File import phải là Excel .xlsx hợp lệ",
+		})
+		return
+	}
+	defer workbook.Close()
+
+	sheetName := workbook.GetSheetName(0)
+	if strings.TrimSpace(sheetName) == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error:   "INVALID_FILE",
+			Message: "File Excel không có sheet dữ liệu",
+		})
+		return
+	}
+
+	rows, err := workbook.GetRows(sheetName)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error:   "INVALID_FILE",
+			Message: "Không đọc được dữ liệu từ file Excel",
+		})
+		return
+	}
+
+	if len(rows) == 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error:   "EMPTY_FILE",
+			Message: "File Excel không có dữ liệu",
+		})
+		return
+	}
+
+	headerRow := make([]string, len(compareSupplyExcelHeaders))
+	for i := range compareSupplyExcelHeaders {
+		if i < len(rows[0]) {
+			headerRow[i] = strings.TrimSpace(rows[0][i])
+		}
+	}
+
+	for i, expected := range compareSupplyExcelHeaders {
+		if headerRow[i] != expected {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Error:   "INVALID_TEMPLATE",
+				Message: fmt.Sprintf("Header cột %d phải là %q", i+1, expected),
+			})
+			return
+		}
+	}
+
+	inputs := make([]models.CompareSupplyReplaceInput, 0, len(rows)-1)
+	seenLibraryCodes := make(map[string]bool)
+
+	for rowIndex := 1; rowIndex < len(rows); rowIndex++ {
+		row := rows[rowIndex]
+		cells := make([]string, len(compareSupplyExcelHeaders))
+		for i := range cells {
+			if i < len(row) {
+				cells[i] = strings.TrimSpace(row[i])
+			}
+		}
+
+		isEmpty := true
+		for _, cell := range cells {
+			if cell != "" {
+				isEmpty = false
+				break
+			}
+		}
+		if isEmpty {
+			continue
+		}
+
+		stt, parseErr := strconv.Atoi(cells[0])
+		if parseErr != nil || stt <= 0 {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Error:   "INVALID_DATA",
+				Message: fmt.Sprintf("Dòng %d có STT không hợp lệ", rowIndex+1),
+			})
+			return
+		}
+
+		maThuVien := cells[2]
+		if maThuVien == "" {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Error:   "INVALID_DATA",
+				Message: fmt.Sprintf("Dòng %d thiếu Mã thư viện", rowIndex+1),
+			})
+			return
+		}
+		if seenLibraryCodes[maThuVien] {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Error:   "DUPLICATE_CODE",
+				Message: fmt.Sprintf("Mã thư viện %q bị lặp trong file import", maThuVien),
+			})
+			return
+		}
+		seenLibraryCodes[maThuVien] = true
+
+		parseFloat := func(raw string, fieldName string) (float64, error) {
+			normalized := strings.ReplaceAll(strings.TrimSpace(raw), ",", "")
+			if normalized == "" {
+				return 0, nil
+			}
+			value, err := strconv.ParseFloat(normalized, 64)
+			if err != nil {
+				return 0, fmt.Errorf("%s không hợp lệ", fieldName)
+			}
+			return value, nil
+		}
+
+		soLuongSuDung12Thang, err := parseFloat(cells[15], "Số lượng sử dụng 12 tháng")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_DATA", Message: fmt.Sprintf("Dòng %d: %s", rowIndex+1, err.Error())})
+			return
+		}
+		soLuongTrungThau2025BoSung, err := parseFloat(cells[16], "Số lượng trúng thầu 2025 + bổ sung")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_DATA", Message: fmt.Sprintf("Dòng %d: %s", rowIndex+1, err.Error())})
+			return
+		}
+		donGiaTrungThau2025, err := parseFloat(cells[17], "Đơn giá trúng thầu năm 2025")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_DATA", Message: fmt.Sprintf("Dòng %d: %s", rowIndex+1, err.Error())})
+			return
+		}
+		donGiaDeXuat2026, err := parseFloat(cells[18], "Đơn giá đề xuất năm 2026")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_DATA", Message: fmt.Sprintf("Dòng %d: %s", rowIndex+1, err.Error())})
+			return
+		}
+		ketQuaTrungThauThapNhat, err := parseFloat(cells[19], "KQ trúng thầu THẤP NHẤT")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_DATA", Message: fmt.Sprintf("Dòng %d: %s", rowIndex+1, err.Error())})
+			return
+		}
+		ketQuaTrungThauCaoNhat, err := parseFloat(cells[21], "KQ trúng thầu CAO NHẤT")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_DATA", Message: fmt.Sprintf("Dòng %d: %s", rowIndex+1, err.Error())})
+			return
+		}
+
+		inputs = append(inputs, models.CompareSupplyReplaceInput{
+			STT:                        stt,
+			TenCongTy:                  cells[1],
+			MaThuVien:                  maThuVien,
+			MaThongTu04:                cells[3],
+			TenVatTu:                   cells[4],
+			TenThuongMai:               cells[5],
+			TSKT2025:                   cells[6],
+			TSKT2026:                   cells[7],
+			ChatLieuVatLieu:            cells[8],
+			DacTinhCauTao:              cells[9],
+			KichThuoc:                  cells[10],
+			ChieuDai:                   cells[11],
+			TinhNangSuDung:             cells[12],
+			TSKTKhac:                   cells[13],
+			DVT:                        cells[14],
+			SoLuongSuDung12Thang:       soLuongSuDung12Thang,
+			SoLuongTrungThau2025BoSung: soLuongTrungThau2025BoSung,
+			DonGiaTrungThau2025:        donGiaTrungThau2025,
+			DonGiaDeXuat2026:           donGiaDeXuat2026,
+			KetQuaTrungThauThapNhat:    ketQuaTrungThauThapNhat,
+			ThoiGianDangTaiThapNhat:    cells[20],
+			KetQuaTrungThauCaoNhat:     ketQuaTrungThauCaoNhat,
+			ThoiGianDangTaiCaoNhat:     cells[22],
+			MaSoThue:                   cells[23],
+			MaHieu:                     cells[24],
+			HangSX:                     cells[25],
+			NuocSX:                     cells[26],
+			NhomNuoc:                   cells[27],
+			ChatLuong:                  cells[28],
+			Ma5086:                     cells[29],
+		})
+	}
+
+	if len(inputs) == 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error:   "EMPTY_FILE",
+			Message: "File Excel không có dòng dữ liệu hợp lệ để import",
+		})
+		return
+	}
+
+	if err := h.repo.ReplaceAllCompareSupplies(inputs); err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error:   "DATABASE_ERROR",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Import dữ liệu so sánh thành công",
+		"count":   len(inputs),
 	})
 }
 
