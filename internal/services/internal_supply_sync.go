@@ -78,6 +78,21 @@ type internalSupplyAPIRow struct {
 	UomName         string  `json:"uom_name"`
 	OriginalPrice   float64 `json:"original_price"`
 	ManufactureName string  `json:"manufacture_name"`
+
+	// New lowercase fields for api_trangbi_thongtinvattu compatibility
+	DonGiaLower          float64 `json:"don_gia"`
+	DonViTinhLower       string  `json:"don_vi_tinh"`
+	HangSXLower          string  `json:"hang_sx"`
+	MaHieuLower          string  `json:"ma_hieu"`
+	MaVtytLower          string  `json:"ma_vtyt"`
+	NhaThauLower         string  `json:"nha_thau"`
+	NuocSXLower          string  `json:"nuoc_sx"`
+	QuyCachLower         string  `json:"quy_cach"`
+	QuyetDinhLower       string  `json:"quyet_dinh"`
+	SlNhapLower          int     `json:"sl_nhap"`
+	SlXuatLower          int     `json:"sl_xuat"`
+	SoLuongTonDauKyLower int     `json:"so_luong_ton_dau_ky"`
+	TenVtytBvLower       string  `json:"ten_vtyt_bv"`
 }
 
 type internalSupplyAPIResponse struct {
@@ -130,13 +145,13 @@ func (s *InternalSupplySyncService) RunOnce(ctx context.Context) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// 1. Sync supplies from product select API
-	rows, err := s.fetchRows(ctx, "/product_select_for_po?method=select")
+	// 1. Sync supplies from API
+	rows, err := s.fetchRows(ctx, "/api_trangbi_thongtinvattu?method=select")
 	if err != nil {
 		return 0, fmt.Errorf("error syncing supplies: %w", err)
 	}
 	if len(rows) == 0 {
-		return 0, fmt.Errorf("internal supply API returned no product rows")
+		return 0, fmt.Errorf("internal supply API returned no product rows (ensure INTERNAL_SUPPLY_API_BODY is set correctly)")
 	}
 
 	inputs := make([]models.SupplyUpsertInput, 0, len(rows))
@@ -219,7 +234,11 @@ func (s *InternalSupplySyncService) durationUntilNextRun(now time.Time) time.Dur
 
 func (s *InternalSupplySyncService) fetchRows(ctx context.Context, path string) ([]internalSupplyAPIRow, error) {
 	apiURL := s.config.InternalSupplyAPIURL + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, strings.NewReader("{}"))
+	bodyString := strings.TrimSpace(s.config.InternalSupplyAPIBody)
+	if bodyString == "" {
+		bodyString = "{}"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, strings.NewReader(bodyString))
 	if err != nil {
 		return nil, fmt.Errorf("error creating internal supply API request: %w", err)
 	}
@@ -326,12 +345,12 @@ func (s *InternalSupplySyncService) fetchPartners(ctx context.Context) ([]hospit
 
 func mapInternalSupplyRow(row internalSupplyAPIRow, index int) models.SupplyUpsertInput {
 	productID := firstNonZero(row.ProductID, row.NewID)
-	id := firstNonEmpty(row.ID, row.MaVtyt, row.NewCode)
-	name := firstNonEmpty(row.Name, row.TenVatTuBV, row.NewName)
-	unit := firstNonEmpty(row.Unit, row.DonViTinh, row.UomName, row.PurchaseUomName)
-	quyCachDongGoi := firstNonEmpty(row.QuyCachDongGoi, row.QuyCach)
-	thongTinThau := firstNonEmpty(row.ThongTinThau, row.QuyetDinh)
-	nhaCungCap := firstNonEmpty(row.NhaCungCap, row.NhaThau)
+	id := firstNonEmpty(row.ID, row.MaVtyt, row.NewCode, row.MaVtytLower)
+	name := firstNonEmpty(row.Name, row.TenVatTuBV, row.NewName, row.TenVtytBvLower)
+	unit := firstNonEmpty(row.Unit, row.DonViTinh, row.UomName, row.PurchaseUomName, row.DonViTinhLower)
+	quyCachDongGoi := firstNonEmpty(row.QuyCachDongGoi, row.QuyCach, row.QuyCachLower)
+	thongTinThau := firstNonEmpty(row.ThongTinThau, row.QuyetDinh, row.QuyetDinhLower)
+	nhaCungCap := firstNonEmpty(row.NhaCungCap, row.NhaThau, row.NhaThauLower)
 	
 	price := row.Price
 	if price == 0 {
@@ -340,9 +359,12 @@ func mapInternalSupplyRow(row internalSupplyAPIRow, index int) models.SupplyUpse
 	if price == 0 {
 		price = row.OriginalPrice
 	}
+	if price == 0 {
+		price = row.DonGiaLower
+	}
 	
-	hangSX := firstNonEmpty(row.HangSXAlt, row.HangSX)
-	nuocSX := firstNonEmpty(row.NuocSXAlt, row.NuocSX)
+	hangSX := firstNonEmpty(row.HangSXAlt, row.HangSX, row.HangSXLower)
+	nuocSX := firstNonEmpty(row.NuocSXAlt, row.NuocSX, row.NuocSXLower)
 	if hangSX == "" && row.ManufactureName != "" {
 		parts := strings.Split(row.ManufactureName, "/")
 		hangSX = strings.TrimSpace(parts[0])
@@ -351,9 +373,9 @@ func mapInternalSupplyRow(row internalSupplyAPIRow, index int) models.SupplyUpse
 		}
 	}
 
-	tonDauKy := firstNonZero(row.TonDauKy, row.SoLuongTonKho, row.SlTon)
-	nhapTrongKy := firstNonZero(row.NhapTrongKy, row.SlNhap)
-	xuatTrongKy := firstNonZero(row.XuatTrongKy, row.SlXuat)
+	tonDauKy := firstNonZero(row.TonDauKy, row.SoLuongTonKho, row.SlTon, row.SoLuongTonDauKyLower)
+	nhapTrongKy := firstNonZero(row.NhapTrongKy, row.SlNhap, row.SlNhapLower)
+	xuatTrongKy := firstNonZero(row.XuatTrongKy, row.SlXuat, row.SlXuatLower)
 
 	return models.SupplyUpsertInput{
 		IDX1:            firstNonZero(row.Idx1, index+1),
@@ -361,7 +383,7 @@ func mapInternalSupplyRow(row internalSupplyAPIRow, index int) models.SupplyUpse
 		GroupName:       strings.TrimSpace(row.GroupName),
 		ID:              strings.TrimSpace(id),
 		IDX2:            strings.TrimSpace(row.Idx2),
-		MaHieu:          strings.TrimSpace(row.MaHieu),
+		MaHieu:          strings.TrimSpace(firstNonEmpty(row.MaHieu, row.MaHieuLower)),
 		TypeName:        strings.TrimSpace(row.TypeName),
 		Name:            strings.TrimSpace(name),
 		Unit:            strings.TrimSpace(unit),

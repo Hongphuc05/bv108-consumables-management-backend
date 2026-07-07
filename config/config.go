@@ -32,6 +32,7 @@ type Config struct {
 	InternalSupplyAPIURL            string
 	InternalSupplyAPIToken          string
 	InternalSupplyAPICookie         string
+	InternalSupplyAPIBody           string
 	InternalSupplyAPITimeoutSeconds int
 	InternalSupplySyncEnabled       bool
 	InternalSupplySyncHour          int
@@ -77,6 +78,7 @@ func LoadConfig() error {
 		InternalSupplyAPIURL:            getEnv("INTERNAL_SUPPLY_API_URL", ""),
 		InternalSupplyAPIToken:          getEnv("INTERNAL_SUPPLY_API_TOKEN", ""),
 		InternalSupplyAPICookie:         getEnv("INTERNAL_SUPPLY_API_COOKIE", ""),
+		InternalSupplyAPIBody:           getEnv("INTERNAL_SUPPLY_API_BODY", "{}"),
 		InternalSupplyAPITimeoutSeconds: getEnvAsInt("INTERNAL_SUPPLY_API_TIMEOUT_SECONDS", 120),
 		InternalSupplySyncEnabled:       getEnvAsBool("INTERNAL_SUPPLY_SYNC_ENABLED", false),
 		InternalSupplySyncHour:          getEnvAsInt("INTERNAL_SUPPLY_SYNC_HOUR", 20),
