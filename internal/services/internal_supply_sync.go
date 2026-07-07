@@ -19,12 +19,17 @@ type internalSupplySyncRepository interface {
 	ReplaceAll(inputs []models.SupplyUpsertInput) error
 }
 
+type companyContactSyncRepository interface {
+	ReplaceAll(contacts []models.CompanyContact) error
+}
+
 type InternalSupplySyncService struct {
-	config     *config.Config
-	repo       internalSupplySyncRepository
-	httpClient *http.Client
-	location   *time.Location
-	mu         sync.Mutex
+	config      *config.Config
+	repo        internalSupplySyncRepository
+	contactRepo companyContactSyncRepository
+	httpClient  *http.Client
+	location    *time.Location
+	mu          sync.Mutex
 }
 
 type internalSupplyAPIRow struct {
@@ -63,6 +68,16 @@ type internalSupplyAPIRow struct {
 	XuatTrongKy     int     `json:"XUATTRONGKY"`
 	TongNhap        int     `json:"TONGNHAP"`
 	TonKhoMin       int     `json:"TON_KHO_MIN"`
+	// New lowercase fields for product_select API compatibility
+	NewID           int     `json:"id"`
+	NewCode         string  `json:"code"`
+	NewName         string  `json:"name"`
+	PurchaseUomId   int     `json:"purchase_uom_id"`
+	PurchaseUomName string  `json:"purchase_uom_name"`
+	UomId           int     `json:"uom_id"`
+	UomName         string  `json:"uom_name"`
+	OriginalPrice   float64 `json:"original_price"`
+	ManufactureName string  `json:"manufacture_name"`
 }
 
 type internalSupplyAPIResponse struct {
@@ -71,7 +86,11 @@ type internalSupplyAPIResponse struct {
 	Items []internalSupplyAPIRow `json:"items"`
 }
 
-func NewInternalSupplySyncService(cfg *config.Config, repo internalSupplySyncRepository) *InternalSupplySyncService {
+func NewInternalSupplySyncService(
+	cfg *config.Config,
+	repo internalSupplySyncRepository,
+	contactRepo companyContactSyncRepository,
+) *InternalSupplySyncService {
 	location, err := time.LoadLocation(strings.TrimSpace(cfg.InternalSupplySyncTimezone))
 	if err != nil {
 		log.Printf("[internal-supply-sync] invalid timezone %q, fallback to local: %v", cfg.InternalSupplySyncTimezone, err)
@@ -84,8 +103,9 @@ func NewInternalSupplySyncService(cfg *config.Config, repo internalSupplySyncRep
 	}
 
 	return &InternalSupplySyncService{
-		config: cfg,
-		repo:   repo,
+		config:      cfg,
+		repo:        repo,
+		contactRepo: contactRepo,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -110,12 +130,13 @@ func (s *InternalSupplySyncService) RunOnce(ctx context.Context) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.fetchRows(ctx)
+	// 1. Sync supplies from product select API
+	rows, err := s.fetchRows(ctx, "/product_select_for_po?method=select")
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("error syncing supplies: %w", err)
 	}
 	if len(rows) == 0 {
-		return 0, fmt.Errorf("internal supply API returned no rows")
+		return 0, fmt.Errorf("internal supply API returned no product rows")
 	}
 
 	inputs := make([]models.SupplyUpsertInput, 0, len(rows))
@@ -124,10 +145,32 @@ func (s *InternalSupplySyncService) RunOnce(ctx context.Context) (int, error) {
 	}
 
 	if err := s.repo.ReplaceAll(inputs); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("error updating supplies database: %w", err)
 	}
 
-	log.Printf("[internal-supply-sync] synced %d supply rows", len(inputs))
+	log.Printf("[internal-supply-sync] synced %d supply rows successfully", len(inputs))
+
+	// 2. Sync company contacts from partner select API
+	partners, err := s.fetchPartners(ctx)
+	if err != nil {
+		log.Printf("[internal-supply-sync] warning: failed to fetch partners: %v", err)
+	} else if len(partners) > 0 {
+		contacts := make([]models.CompanyContact, 0, len(partners))
+		defaultEmail := models.ResolveDefaultCompanyContactEmail()
+		for _, p := range partners {
+			contacts = append(contacts, models.CompanyContact{
+				MaSoThue:  strings.TrimSpace(p.Code), // Use partner Code (e.g. NCC_DATVIET) as primary key ma_so_thue
+				TenCongTy: strings.TrimSpace(p.Name),
+				Gmail:     defaultEmail,
+			})
+		}
+		if err := s.contactRepo.ReplaceAll(contacts); err != nil {
+			log.Printf("[internal-supply-sync] warning: failed to update company contacts: %v", err)
+		} else {
+			log.Printf("[internal-supply-sync] synced %d company contacts successfully", len(contacts))
+		}
+	}
+
 	return len(inputs), nil
 }
 
@@ -174,15 +217,20 @@ func (s *InternalSupplySyncService) durationUntilNextRun(now time.Time) time.Dur
 	return nextRun.Sub(current)
 }
 
-func (s *InternalSupplySyncService) fetchRows(ctx context.Context) ([]internalSupplyAPIRow, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.config.InternalSupplyAPIURL, nil)
+func (s *InternalSupplySyncService) fetchRows(ctx context.Context, path string) ([]internalSupplyAPIRow, error) {
+	apiURL := s.config.InternalSupplyAPIURL + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, strings.NewReader("{}"))
 	if err != nil {
 		return nil, fmt.Errorf("error creating internal supply API request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 
 	if token := strings.TrimSpace(s.config.InternalSupplyAPIToken); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if cookie := strings.TrimSpace(s.config.InternalSupplyAPICookie); cookie != "" {
+		req.Header.Set("Cookie", cookie)
 	}
 
 	resp, err := s.httpClient.Do(req)
@@ -201,13 +249,12 @@ func (s *InternalSupplySyncService) fetchRows(ctx context.Context) ([]internalSu
 		return nil, fmt.Errorf("error reading internal supply API response: %w", err)
 	}
 
-	var listPayload []internalSupplyAPIRow
-	if err := json.Unmarshal(body, &listPayload); err == nil && len(listPayload) > 0 {
-		return listPayload, nil
-	}
-
 	var objectPayload internalSupplyAPIResponse
 	if err := json.Unmarshal(body, &objectPayload); err != nil {
+		var listPayload []internalSupplyAPIRow
+		if err2 := json.Unmarshal(body, &listPayload); err2 == nil {
+			return listPayload, nil
+		}
 		return nil, fmt.Errorf("error decoding internal supply API response: %w", err)
 	}
 
@@ -223,26 +270,94 @@ func (s *InternalSupplySyncService) fetchRows(ctx context.Context) ([]internalSu
 	}
 }
 
+type hospitalPartnerRow struct {
+	ID   string `json:"id"`
+	Code string `json:"code"`
+	Name string `json:"name"`
+}
+
+type hospitalPartnerAPIResponse struct {
+	Data []hospitalPartnerRow `json:"data"`
+}
+
+func (s *InternalSupplySyncService) fetchPartners(ctx context.Context) ([]hospitalPartnerRow, error) {
+	apiURL := s.config.InternalSupplyAPIURL + "/partner_select_for_po?method=select"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, strings.NewReader("{}"))
+	if err != nil {
+		return nil, fmt.Errorf("error creating partner API request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+
+	if token := strings.TrimSpace(s.config.InternalSupplyAPIToken); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if cookie := strings.TrimSpace(s.config.InternalSupplyAPICookie); cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error calling partner API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("partner API returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading partner API response: %w", err)
+	}
+
+	var payload hospitalPartnerAPIResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		var listPayload []hospitalPartnerRow
+		if err2 := json.Unmarshal(body, &listPayload); err2 == nil {
+			return listPayload, nil
+		}
+		return nil, fmt.Errorf("error decoding partner API response: %w", err)
+	}
+
+	return payload.Data, nil
+}
+
 func mapInternalSupplyRow(row internalSupplyAPIRow, index int) models.SupplyUpsertInput {
-	id := firstNonEmpty(row.ID, row.MaVtyt)
-	name := firstNonEmpty(row.Name, row.TenVatTuBV)
-	unit := firstNonEmpty(row.Unit, row.DonViTinh)
+	productID := firstNonZero(row.ProductID, row.NewID)
+	id := firstNonEmpty(row.ID, row.MaVtyt, row.NewCode)
+	name := firstNonEmpty(row.Name, row.TenVatTuBV, row.NewName)
+	unit := firstNonEmpty(row.Unit, row.DonViTinh, row.UomName, row.PurchaseUomName)
 	quyCachDongGoi := firstNonEmpty(row.QuyCachDongGoi, row.QuyCach)
 	thongTinThau := firstNonEmpty(row.ThongTinThau, row.QuyetDinh)
-	hangSX := firstNonEmpty(row.HangSXAlt, row.HangSX)
-	nuocSX := firstNonEmpty(row.NuocSXAlt, row.NuocSX)
 	nhaCungCap := firstNonEmpty(row.NhaCungCap, row.NhaThau)
+	
 	price := row.Price
 	if price == 0 {
 		price = row.DonGia
 	}
+	if price == 0 {
+		price = row.OriginalPrice
+	}
+	
+	hangSX := firstNonEmpty(row.HangSXAlt, row.HangSX)
+	nuocSX := firstNonEmpty(row.NuocSXAlt, row.NuocSX)
+	if hangSX == "" && row.ManufactureName != "" {
+		parts := strings.Split(row.ManufactureName, "/")
+		hangSX = strings.TrimSpace(parts[0])
+		if len(parts) > 1 {
+			nuocSX = strings.TrimSpace(parts[1])
+		}
+	}
+
 	tonDauKy := firstNonZero(row.TonDauKy, row.SoLuongTonKho, row.SlTon)
 	nhapTrongKy := firstNonZero(row.NhapTrongKy, row.SlNhap)
 	xuatTrongKy := firstNonZero(row.XuatTrongKy, row.SlXuat)
 
 	return models.SupplyUpsertInput{
 		IDX1:            firstNonZero(row.Idx1, index+1),
-		ProductID:       row.ProductID,
+		ProductID:       productID,
 		GroupName:       strings.TrimSpace(row.GroupName),
 		ID:              strings.TrimSpace(id),
 		IDX2:            strings.TrimSpace(row.Idx2),

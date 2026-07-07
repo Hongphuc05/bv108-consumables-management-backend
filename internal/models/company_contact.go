@@ -474,3 +474,60 @@ func scanCompanyContact(row scanner) (*CompanyContact, error) {
 
 	return &contact, nil
 }
+
+// ReplaceAll inserts/updates company contacts list in transaction
+func (r *CompanyContactRepository) ReplaceAll(contacts []CompanyContact) error {
+	tx, err := r.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("error starting transaction for company contacts sync: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	insertSQL := `
+		INSERT INTO company_contacts (
+			ma_so_thue, ten_cong_ty, so_hd, ngay_hd, dia_chi_cong_ty,
+			so_tk_ngan_hang, ten_ngan_hang, chi_nhanh, qd, so_goi_thau, gmail
+		) VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?)
+		ON DUPLICATE KEY UPDATE
+			ten_cong_ty = VALUES(ten_cong_ty),
+			gmail = COALESCE(NULLIF(company_contacts.gmail, ''), VALUES(gmail))
+	`
+	stmt, err := tx.Prepare(insertSQL)
+	if err != nil {
+		return fmt.Errorf("error preparing company contacts sync statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, c := range contacts {
+		var ngayHD interface{} = c.NgayHD
+		if c.NgayHD == "" {
+			ngayHD = nil
+		}
+		if _, err = stmt.Exec(
+			c.MaSoThue,
+			c.TenCongTy,
+			c.SoHD,
+			ngayHD,
+			c.DiaChiCongTy,
+			c.SoTKNganHang,
+			c.TenNganHang,
+			c.ChiNhanh,
+			c.QD,
+			c.SoGoiThau,
+			c.Gmail,
+		); err != nil {
+			return fmt.Errorf("error inserting company contact %q: %w", c.MaSoThue, err)
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("error committing company contacts sync: %w", err)
+	}
+
+	return nil
+}
+

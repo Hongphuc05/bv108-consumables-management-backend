@@ -150,7 +150,7 @@ func main() {
 	hoaDonHandler := handlers.NewHoaDonHandler(hoaDonRepo, userRepo, config.AppConfig.JWTSecret)
 	refreshHandler := handlers.NewRefreshHandler(hoaDonRepo, userRepo, config.AppConfig.JWTSecret, realtimeHub)
 
-	internalSupplySyncService := services.NewInternalSupplySyncService(config.AppConfig, supplyRepo)
+	internalSupplySyncService := services.NewInternalSupplySyncService(config.AppConfig, supplyRepo, companyContactRepo)
 	internalSupplySyncHandler := handlers.NewInternalSupplySyncHandler(
 		internalSupplySyncService,
 		userRepo,
