@@ -8,27 +8,28 @@ import (
 
 // Supply represents a medical supply item from the database
 type Supply struct {
-	IDX1         int             `json:"idx1"`
-	ProductID    sql.NullInt32   `json:"productId"`
-	GroupName    sql.NullString  `json:"groupName"`
-	ID           sql.NullString  `json:"id"`
-	IDX2         sql.NullString  `json:"idx2"`
-	MaHieu       sql.NullString  `json:"maHieu"`
-	TypeName     sql.NullString  `json:"typeName"`
-	Name         sql.NullString  `json:"name"`
-	Unit         sql.NullString  `json:"unit"`
-	QuyCach      sql.NullString  `json:"quyCach"`
-	ThongTinThau sql.NullString  `json:"thongTinThau"`
-	TongThau     sql.NullString  `json:"tongThau"`
-	HangSX       sql.NullString  `json:"hangSx"`
-	NuocSX       sql.NullString  `json:"nuocSx"`
-	NhaCungCap   sql.NullString  `json:"nhaCungCap"`
-	Price        sql.NullFloat64 `json:"price"`
-	TonDauKy     sql.NullInt32   `json:"tonDauKy"`
-	NhapTrongKy  sql.NullInt32   `json:"nhapTrongKy"`
-	XuatTrongKy  sql.NullInt32   `json:"xuatTrongKy"`
-	TongNhap     sql.NullInt32   `json:"tongNhap"`
-	TonKhoMin    sql.NullInt32   `json:"tonKhoMin"`
+	IDX1            int             `json:"idx1"`
+	ProductID       sql.NullInt32   `json:"productId"`
+	GroupName       sql.NullString  `json:"groupName"`
+	ID              sql.NullString  `json:"id"`
+	IDX2            sql.NullString  `json:"idx2"`
+	MaHieu          sql.NullString  `json:"maHieu"`
+	TypeName        sql.NullString  `json:"typeName"`
+	Name            sql.NullString  `json:"name"`
+	Unit            sql.NullString  `json:"unit"`
+	QuyCach         sql.NullString  `json:"quyCach"`
+	QuyCachToiThieu sql.NullString  `json:"quyCachToiThieu"`
+	ThongTinThau    sql.NullString  `json:"thongTinThau"`
+	TongThau        sql.NullString  `json:"tongThau"`
+	HangSX          sql.NullString  `json:"hangSx"`
+	NuocSX          sql.NullString  `json:"nuocSx"`
+	NhaCungCap      sql.NullString  `json:"nhaCungCap"`
+	Price           sql.NullFloat64 `json:"price"`
+	TonDauKy        sql.NullInt32   `json:"tonDauKy"`
+	NhapTrongKy     sql.NullInt32   `json:"nhapTrongKy"`
+	XuatTrongKy     sql.NullInt32   `json:"xuatTrongKy"`
+	TongNhap        sql.NullInt32   `json:"tongNhap"`
+	TonKhoMin       sql.NullInt32   `json:"tonKhoMin"`
 	// Calculated field
 	TonCuoiKy int `json:"tonCuoiKy"`
 }
@@ -147,6 +148,7 @@ type SupplyUpsertInput struct {
 	Unit            string
 	QuyCachDongGoi  string
 	QuyCachGiaoHang string
+	QuyCachToiThieu string
 	ThongTinThau    string
 	TongThau        string
 	HangSX          string
@@ -195,7 +197,7 @@ type CompareSupplyReplaceInput struct {
 
 const supplySelectColumns = `
 	IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT, QUY_CACH_DONG_GOI AS QUY_CACH,
-	THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
+	QUY_CACH_TOI_THIEU, THONG_TIN_THAU, TONGTHAU, HANGSX, NUOC_SX, NHA_CUNG_CAP,
 	PRICE, TONDAUKY, NHAPTRONGKY, XUATTRONGKY, TONGNHAP, TON_KHO_MIN
 `
 
@@ -205,7 +207,7 @@ func scanSupply(scanner interface {
 	var s Supply
 	err := scanner.Scan(
 		&s.IDX1, &s.ProductID, &s.GroupName, &s.ID, &s.IDX2, &s.MaHieu,
-		&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.ThongTinThau, &s.TongThau,
+		&s.TypeName, &s.Name, &s.Unit, &s.QuyCach, &s.QuyCachToiThieu, &s.ThongTinThau, &s.TongThau,
 		&s.HangSX, &s.NuocSX, &s.NhaCungCap, &s.Price,
 		&s.TonDauKy, &s.NhapTrongKy, &s.XuatTrongKy, &s.TongNhap, &s.TonKhoMin,
 	)
@@ -814,10 +816,10 @@ func (r *SupplyRepository) ReplaceAll(inputs []SupplyUpsertInput) error {
 	insertSQL := `
 		INSERT INTO supplies (
 			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT,
-			QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, THONG_TIN_THAU, TONGTHAU,
+			QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, QUY_CACH_TOI_THIEU, THONG_TIN_THAU, TONGTHAU,
 			HANGSX, NUOC_SX, NHA_CUNG_CAP, PRICE, TONDAUKY, NHAPTRONGKY,
 			XUATTRONGKY, TONGNHAP, TON_KHO_MIN
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	stmt, err := tx.Prepare(insertSQL)
@@ -839,6 +841,7 @@ func (r *SupplyRepository) ReplaceAll(inputs []SupplyUpsertInput) error {
 			input.Unit,
 			input.QuyCachDongGoi,
 			input.QuyCachGiaoHang,
+			input.QuyCachToiThieu,
 			input.ThongTinThau,
 			input.TongThau,
 			input.HangSX,

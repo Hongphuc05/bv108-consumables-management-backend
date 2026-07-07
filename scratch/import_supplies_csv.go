@@ -60,7 +60,7 @@ func replaceSupplies(db *sql.DB, inputs []models.SupplyUpsertInput) (err error) 
 	baseSQL := `
 		INSERT INTO supplies (
 			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT,
-			QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, THONG_TIN_THAU, TONGTHAU,
+			QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, QUY_CACH_TOI_THIEU, THONG_TIN_THAU, TONGTHAU,
 			HANGSX, NUOC_SX, NHA_CUNG_CAP, PRICE, TONDAUKY, NHAPTRONGKY,
 			XUATTRONGKY, TONGNHAP, TON_KHO_MIN
 		) VALUES %s
@@ -77,7 +77,7 @@ func replaceSupplies(db *sql.DB, inputs []models.SupplyUpsertInput) (err error) 
 			args              []interface{}
 		)
 		for _, input := range inputs[start:end] {
-			valuePlaceholders = append(valuePlaceholders, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+			valuePlaceholders = append(valuePlaceholders, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 			args = append(args,
 				input.IDX1,
 				input.ProductID,
@@ -90,6 +90,7 @@ func replaceSupplies(db *sql.DB, inputs []models.SupplyUpsertInput) (err error) 
 				input.Unit,
 				input.QuyCachDongGoi,
 				input.QuyCachGiaoHang,
+				input.QuyCachToiThieu,
 				input.ThongTinThau,
 				input.TongThau,
 				input.HangSX,
@@ -140,7 +141,7 @@ func loadCSV(path string) ([]models.SupplyUpsertInput, error) {
 
 	required := []string{
 		"IDX1", "PRODUCTID", "GROUPNAME", "ID", "IDX2", "MA_HIEU", "TYPENAME", "NAME", "UNIT",
-		"QUY_CACH_DONG_GOI", "QUY_CACH_GIAO_HANG", "THONG_TIN_THAU", "TONGTHAU", "HANGSX",
+		"QUY_CACH_DONG_GOI", "QUY_CACH_GIAO_HANG", "QUY_CACH_TOI_THIEU", "THONG_TIN_THAU", "TONGTHAU", "HANGSX",
 		"NUOC_SX", "NHA_CUNG_CAP", "PRICE", "TONDAUKY", "NHAPTRONGKY", "XUATTRONGKY", "TONGNHAP", "TON_KHO_MIN",
 	}
 	for _, key := range required {
@@ -200,6 +201,7 @@ func loadCSV(path string) ([]models.SupplyUpsertInput, error) {
 			Unit:            getCell(row, headerIndex, "UNIT"),
 			QuyCachDongGoi:  getCell(row, headerIndex, "QUY_CACH_DONG_GOI"),
 			QuyCachGiaoHang: getCell(row, headerIndex, "QUY_CACH_GIAO_HANG"),
+			QuyCachToiThieu: getCell(row, headerIndex, "QUY_CACH_TOI_THIEU"),
 			ThongTinThau:    getCell(row, headerIndex, "THONG_TIN_THAU"),
 			TongThau:        getCell(row, headerIndex, "TONGTHAU"),
 			HangSX:          getCell(row, headerIndex, "HANGSX"),

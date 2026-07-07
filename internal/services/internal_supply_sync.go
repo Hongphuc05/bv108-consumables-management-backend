@@ -48,6 +48,7 @@ type internalSupplyAPIRow struct {
 	QuyCach         string  `json:"QUY_CACH"`
 	QuyCachDongGoi  string  `json:"QUY_CACH_DONG_GOI"`
 	QuyCachGiaoHang string  `json:"QUY_CACH_GIAO_HANG"`
+	QuyCachToiThieu string  `json:"QUY_CACH_TOI_THIEU"`
 	QuyetDinh       string  `json:"QUYET_DINH"`
 	ThongTinThau    string  `json:"THONG_TIN_THAU"`
 	TongThau        string  `json:"TONGTHAU"`
@@ -96,8 +97,8 @@ type internalSupplyAPIRow struct {
 }
 
 type internalSupplyAPIResponse struct {
-	Data []internalSupplyAPIRow `json:"data"`
-	Rows []internalSupplyAPIRow `json:"rows"`
+	Data  []internalSupplyAPIRow `json:"data"`
+	Rows  []internalSupplyAPIRow `json:"rows"`
 	Items []internalSupplyAPIRow `json:"items"`
 }
 
@@ -351,7 +352,7 @@ func mapInternalSupplyRow(row internalSupplyAPIRow, index int) models.SupplyUpse
 	quyCachDongGoi := firstNonEmpty(row.QuyCachDongGoi, row.QuyCach, row.QuyCachLower)
 	thongTinThau := firstNonEmpty(row.ThongTinThau, row.QuyetDinh, row.QuyetDinhLower)
 	nhaCungCap := firstNonEmpty(row.NhaCungCap, row.NhaThau, row.NhaThauLower)
-	
+
 	price := row.Price
 	if price == 0 {
 		price = row.DonGia
@@ -362,7 +363,7 @@ func mapInternalSupplyRow(row internalSupplyAPIRow, index int) models.SupplyUpse
 	if price == 0 {
 		price = row.DonGiaLower
 	}
-	
+
 	hangSX := firstNonEmpty(row.HangSXAlt, row.HangSX, row.HangSXLower)
 	nuocSX := firstNonEmpty(row.NuocSXAlt, row.NuocSX, row.NuocSXLower)
 	if hangSX == "" && row.ManufactureName != "" {
@@ -389,6 +390,7 @@ func mapInternalSupplyRow(row internalSupplyAPIRow, index int) models.SupplyUpse
 		Unit:            strings.TrimSpace(unit),
 		QuyCachDongGoi:  strings.TrimSpace(quyCachDongGoi),
 		QuyCachGiaoHang: strings.TrimSpace(row.QuyCachGiaoHang),
+		QuyCachToiThieu: strings.TrimSpace(row.QuyCachToiThieu),
 		ThongTinThau:    strings.TrimSpace(thongTinThau),
 		TongThau:        strings.TrimSpace(row.TongThau),
 		HangSX:          strings.TrimSpace(hangSX),
