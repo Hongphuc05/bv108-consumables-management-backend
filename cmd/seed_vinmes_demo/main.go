@@ -20,17 +20,14 @@ import (
 
 const demoSeedUsername = "vinmes_demo_seed"
 const vinmesDemoCSVPathEnvKey = "VINMES_DEMO_CSV_PATH"
-
-var demoMaterialCodes = []string{
-	"D06041",
-	"A00191",
-	"A72781",
-}
+const vinmesDemoLimitEnvKey = "VINMES_DEMO_LIMIT"
+const defaultVinmesDemoLimit = 24
 
 type csvInvoiceRow struct {
 	TrangThaiHoaDon  string
 	LoaiHoaDon       string
 	SoHoaDon         string
+	KyHieu           string
 	NgayHoaDon       time.Time
 	MaSoThueNguoiBan string
 	CongTy           string
@@ -87,7 +84,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("resolve csv path: %v (tried: %s)", err, strings.Join(triedPaths, "; "))
 	}
-	csvRows, err := loadCSVRows(csvPath, demoMaterialCodes)
+	limit, err := resolveDemoLimit()
+	if err != nil {
+		log.Fatalf("resolve demo limit: %v", err)
+	}
+	csvRows, err := loadCSVRows(csvPath, limit)
 	if err != nil {
 		log.Fatalf("load csv rows: %v", err)
 	}
@@ -103,26 +104,21 @@ func main() {
 	}
 
 	now := time.Now()
-	seededOrders := make([]seededOrder, 0, len(demoMaterialCodes))
-	for _, code := range demoMaterialCodes {
-		row, ok := csvRows[code]
-		if !ok {
-			log.Fatalf("missing csv row for material code %s", code)
-		}
-
+	seededOrders := make([]seededOrder, 0, len(csvRows))
+	for index, row := range csvRows {
 		hoaDonRecord, err := ensureHoaDonRow(tx, row)
 		if err != nil {
-			log.Fatalf("ensure hoa_don row %s: %v", code, err)
+			log.Fatalf("ensure hoa_don row %s/%d: %v", row.SoHoaDon, row.STTDongHang, err)
 		}
 
 		orderHistoryID, err := insertOrderHistory(tx, actor, hoaDonRecord, now)
 		if err != nil {
-			log.Fatalf("insert order history %s: %v", code, err)
+			log.Fatalf("insert order history %s/%d: %v", row.SoHoaDon, row.STTDongHang, err)
 		}
 
 		seededOrders = append(seededOrders, seededOrder{
 			OrderHistoryID: orderHistoryID,
-			OrderBatchKey:  fmt.Sprintf("vinmes-demo-%s", strings.ToLower(code)),
+			OrderBatchKey:  fmt.Sprintf("vinmes-demo-%s-%03d", strings.ToLower(strings.TrimSpace(row.SoHoaDon)), index+1),
 			HoaDon:         hoaDonRecord,
 		})
 	}
@@ -162,7 +158,7 @@ func main() {
 			MatchedByUsername:       actor.Username,
 			MatchedByEmail:          actor.Email,
 			MatchedAt:               now,
-			Note:                    fmt.Sprintf("demo export-to-vinmes %s", item.HoaDon.MaHangHoa),
+			Note:                    fmt.Sprintf("demo export-to-vinmes %s %s/%d", item.HoaDon.SoHoaDon, item.HoaDon.MaHangHoa, item.HoaDon.STTDongHang),
 			Status:                  models.InvoiceReconciliationStatusDone,
 		})
 	}
@@ -173,8 +169,26 @@ func main() {
 
 	fmt.Printf("Seeded %d Vinmes demo reconciliations for %04d-%02d\n", len(inputs), now.Year(), now.Month())
 	for _, item := range seededOrders {
-		fmt.Printf("- %s | invoice=%s | supplier=%s | order_history_id=%d\n", item.HoaDon.MaHangHoa, item.HoaDon.SoHoaDon, item.HoaDon.CongTy, item.OrderHistoryID)
+		fmt.Printf("- %s | invoice=%s | ky_hieu=%s | supplier=%s | order_history_id=%d\n", item.HoaDon.MaHangHoa, item.HoaDon.SoHoaDon, item.HoaDon.KyHieu, item.HoaDon.CongTy, item.OrderHistoryID)
 	}
+}
+
+func resolveDemoLimit() (int, error) {
+	raw := strings.TrimSpace(os.Getenv(vinmesDemoLimitEnvKey))
+	if raw == "" {
+		return defaultVinmesDemoLimit, nil
+	}
+
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", vinmesDemoLimitEnvKey)
+	}
+
+	if value > 200 {
+		value = 200
+	}
+
+	return value, nil
 }
 
 func selectSeedActor(userRepo *models.UserRepository) (*models.UserProfile, error) {
@@ -243,7 +257,7 @@ func resolveDemoCSVPath() (string, []string, error) {
 	return "", tried, fmt.Errorf("could not locate invoices_export.csv")
 }
 
-func loadCSVRows(csvPath string, materialCodes []string) (map[string]csvInvoiceRow, error) {
+func loadCSVRows(csvPath string, limit int) ([]csvInvoiceRow, error) {
 	file, err := os.Open(csvPath)
 	if err != nil {
 		return nil, fmt.Errorf("open csv: %w", err)
@@ -267,21 +281,22 @@ func loadCSVRows(csvPath string, materialCodes []string) (map[string]csvInvoiceR
 		indexByName[name] = index
 	}
 
-	needed := make(map[string]struct{}, len(materialCodes))
-	for _, code := range materialCodes {
-		needed[strings.TrimSpace(code)] = struct{}{}
-	}
-
-	result := make(map[string]csvInvoiceRow, len(materialCodes))
+	result := make([]csvInvoiceRow, 0, limit)
+	seenInvoiceRows := make(map[string]struct{}, limit)
 	for _, rawRow := range rows[1:] {
 		code := strings.TrimSpace(csvValue(rawRow, indexByName, "ma hang hoa"))
 		if code == "" {
 			continue
 		}
-		if _, ok := needed[code]; !ok {
+
+		invoiceID := strings.TrimSpace(csvValue(rawRow, indexByName, "id cua hoa don"))
+		sttDongHangText := strings.TrimSpace(csvValue(rawRow, indexByName, "stt dong hang"))
+		if invoiceID == "" || sttDongHangText == "" {
 			continue
 		}
-		if _, exists := result[code]; exists {
+
+		uniqueKey := invoiceID + "#" + sttDongHangText
+		if _, exists := seenInvoiceRows[uniqueKey]; exists {
 			continue
 		}
 
@@ -310,10 +325,11 @@ func loadCSVRows(csvPath string, materialCodes []string) (map[string]csvInvoiceR
 			return nil, fmt.Errorf("parse thue for %s: %w", code, err)
 		}
 
-		result[code] = csvInvoiceRow{
+		result = append(result, csvInvoiceRow{
 			TrangThaiHoaDon:  strings.TrimSpace(csvValue(rawRow, indexByName, "trang thai hoa don")),
 			LoaiHoaDon:       strings.TrimSpace(csvValue(rawRow, indexByName, "loai hoa don")),
 			SoHoaDon:         strings.TrimSpace(csvValue(rawRow, indexByName, "so hoa don")),
+			KyHieu:           strings.TrimSpace(csvValue(rawRow, indexByName, "ky hieu")),
 			NgayHoaDon:       ngayHoaDon,
 			MaSoThueNguoiBan: strings.TrimSpace(csvValue(rawRow, indexByName, "ma so thue nguoi ban")),
 			CongTy:           strings.TrimSpace(csvValue(rawRow, indexByName, "cong ty")),
@@ -327,13 +343,16 @@ func loadCSVRows(csvPath string, materialCodes []string) (map[string]csvInvoiceR
 			SoLuong:          soLuong,
 			DonGiaChuaThue:   donGia,
 			ThueSuatGTGT:     thue,
+		})
+		seenInvoiceRows[uniqueKey] = struct{}{}
+
+		if len(result) >= limit {
+			break
 		}
 	}
 
-	for _, code := range materialCodes {
-		if _, ok := result[code]; !ok {
-			return nil, fmt.Errorf("material code %s not found in csv", code)
-		}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("no usable invoice rows found in csv")
 	}
 
 	return result, nil
@@ -426,6 +445,16 @@ func cleanupExistingDemoData(tx *sql.Tx) error {
 func ensureHoaDonRow(tx *sql.Tx, row csvInvoiceRow) (hoaDonRow, error) {
 	existing, err := findHoaDonRow(tx, row.IDHoaDon, row.STTDongHang)
 	if err == nil {
+		if strings.TrimSpace(existing.KyHieu) == "" && strings.TrimSpace(row.KyHieu) != "" {
+			if _, updateErr := tx.Exec(`
+				UPDATE hoa_don
+				SET kyhieu = ?
+				WHERE id = ?
+			`, row.KyHieu, existing.ID); updateErr != nil {
+				return hoaDonRow{}, fmt.Errorf("update hoa_don kyhieu: %w", updateErr)
+			}
+			existing.KyHieu = row.KyHieu
+		}
 		return existing, nil
 	}
 	if err != sql.ErrNoRows {
@@ -438,6 +467,7 @@ func ensureHoaDonRow(tx *sql.Tx, row csvInvoiceRow) (hoaDonRow, error) {
 			trang_thai_hoa_don,
 			loai_hoa_don,
 			so_hoa_don,
+			kyhieu,
 			ngay_hoa_don,
 			ma_so_thue_nguoi_ban,
 			cong_ty,
@@ -452,12 +482,13 @@ func ensureHoaDonRow(tx *sql.Tx, row csvInvoiceRow) (hoaDonRow, error) {
 			don_gia_chua_thue,
 			thue_suat_gtgt
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		nil,
 		row.TrangThaiHoaDon,
 		row.LoaiHoaDon,
 		row.SoHoaDon,
+		row.KyHieu,
 		row.NgayHoaDon,
 		row.MaSoThueNguoiBan,
 		row.CongTy,
@@ -492,6 +523,7 @@ func findHoaDonRow(tx *sql.Tx, invoiceID string, sttDongHang int) (hoaDonRow, er
 			trang_thai_hoa_don,
 			loai_hoa_don,
 			so_hoa_don,
+			kyhieu,
 			ngay_hoa_don,
 			ma_so_thue_nguoi_ban,
 			cong_ty,
@@ -513,6 +545,7 @@ func findHoaDonRow(tx *sql.Tx, invoiceID string, sttDongHang int) (hoaDonRow, er
 		&row.TrangThaiHoaDon,
 		&row.LoaiHoaDon,
 		&row.SoHoaDon,
+		&row.KyHieu,
 		&row.NgayHoaDon,
 		&row.MaSoThueNguoiBan,
 		&row.CongTy,

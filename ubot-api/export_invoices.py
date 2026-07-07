@@ -5,7 +5,7 @@ Script lấy hóa đơn theo đúng format yêu cầu
 from ubot_client import UBotAPIClient
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 
 
 def is_valid_item(item):
@@ -111,6 +111,7 @@ def export_invoices_to_format(
         # Lấy invoiceId để tạo link UBot
         invoice_id = invoice.get("invoiceId", "")
         ubot_link = f"https://portal.ubot.vn/api/invoices/{invoice_id}/pdf/blob" if invoice_id else ""
+        ky_hieu = f"{invoice.get('modelNo') or ''}{invoice.get('serial') or ''}".strip()
         
         # Thông tin chung của hóa đơn
         invoice_info = {
@@ -147,6 +148,7 @@ def export_invoices_to_format(
                         "Số lượng": item.get("itemQuantity") or 0,
                         "Đơn giá chưa thuế": item.get("itemPrice") or 0,
                         "Thuế suất GTGT": item.get("itemTax") or 0,
+                        "Ký hiệu": ky_hieu,
                     })
                     
                     output_data.append(row)
@@ -169,20 +171,20 @@ def export_all_invoices(
     invoice_status="VALID"  # Khôi phục filter
 ):
     """
-    Lấy tất cả hóa đơn với phân trang (CHỈ LẤY 3 NGÀY GẦN NHẤT)
+    Lấy tất cả hóa đơn với phân trang trong tháng hiện tại.
     
     Args:
         max_invoices: Số lượng hóa đơn tối đa cần lấy (None = lấy hết)
     """
-    # Tính toán ngày: từ 3 ngày trước đến hôm nay
+    # Tính toán ngày: từ đầu tháng hiện tại đến hôm nay
     today = datetime.now()
-    three_days_ago = today - timedelta(days=3)
+    start_of_month = today.replace(day=1)
     
     # Format theo định dạng DD/MM/YYYY
     date_to = today.strftime("%d/%m/%Y")
-    date_from = three_days_ago.strftime("%d/%m/%Y")
+    date_from = start_of_month.strftime("%d/%m/%Y")
     
-    print(f"[UBOT] Fetching invoices from {date_from} to {date_to} (last 3 days)")
+    print(f"[UBOT] Fetching invoices from {date_from} to {date_to} (current month)")
     
     all_data = []
     page = 0

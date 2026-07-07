@@ -12,6 +12,7 @@ type HoaDon struct {
 	TrangThaiHoaDon  string    `json:"trangThaiHoaDon"`
 	LoaiHoaDon       string    `json:"loaiHoaDon"`
 	SoHoaDon         string    `json:"soHoaDon"`
+	KyHieu           string    `json:"kyHieu"`
 	NgayHoaDon       time.Time `json:"ngayHoaDon"`
 	MaSoThueNguoiBan string    `json:"maSoThueNguoiBan"`
 	CongTy           string    `json:"congTy"`
@@ -41,7 +42,7 @@ func NewHoaDonRepository(db *sql.DB) *HoaDonRepository {
 func (r *HoaDonRepository) GetAll(limit, offset int) ([]HoaDon, error) {
 	query := `
 		SELECT 
-			id, company_contact_id, trang_thai_hoa_don, loai_hoa_don, so_hoa_don, ngay_hoa_don,
+			id, company_contact_id, trang_thai_hoa_don, loai_hoa_don, so_hoa_don, kyhieu, ngay_hoa_don,
 			ma_so_thue_nguoi_ban, cong_ty, dia_chi, link_tra_cuu_hoa_don,
 			id_hoa_don, stt_dong_hang, ten_hang_hoa, ma_hang_hoa,
 			don_vi_tinh, so_luong, don_gia_chua_thue, thue_suat_gtgt
@@ -61,7 +62,7 @@ func (r *HoaDonRepository) GetAll(limit, offset int) ([]HoaDon, error) {
 		var hd HoaDon
 		var companyContactID sql.NullString
 		err := rows.Scan(
-			&hd.ID, &companyContactID, &hd.TrangThaiHoaDon, &hd.LoaiHoaDon, &hd.SoHoaDon, &hd.NgayHoaDon,
+			&hd.ID, &companyContactID, &hd.TrangThaiHoaDon, &hd.LoaiHoaDon, &hd.SoHoaDon, &hd.KyHieu, &hd.NgayHoaDon,
 			&hd.MaSoThueNguoiBan, &hd.CongTy, &hd.DiaChi, &hd.LinkTraCuuHoaDon,
 			&hd.IDHoaDon, &hd.STTDongHang, &hd.TenHangHoa, &hd.MaHangHoa,
 			&hd.DonViTinh, &hd.SoLuong, &hd.DonGiaChuaThue, &hd.ThueSuatGTGT,
@@ -91,7 +92,7 @@ func (r *HoaDonRepository) GetCount() (int, error) {
 func (r *HoaDonRepository) GetByIDHoaDon(idHoaDon string) ([]HoaDon, error) {
 	query := `
 		SELECT 
-			id, company_contact_id, trang_thai_hoa_don, loai_hoa_don, so_hoa_don, ngay_hoa_don,
+			id, company_contact_id, trang_thai_hoa_don, loai_hoa_don, so_hoa_don, kyhieu, ngay_hoa_don,
 			ma_so_thue_nguoi_ban, cong_ty, dia_chi, link_tra_cuu_hoa_don,
 			id_hoa_don, stt_dong_hang, ten_hang_hoa, ma_hang_hoa,
 			don_vi_tinh, so_luong, don_gia_chua_thue, thue_suat_gtgt
@@ -111,7 +112,7 @@ func (r *HoaDonRepository) GetByIDHoaDon(idHoaDon string) ([]HoaDon, error) {
 		var hd HoaDon
 		var companyContactID sql.NullString
 		err := rows.Scan(
-			&hd.ID, &companyContactID, &hd.TrangThaiHoaDon, &hd.LoaiHoaDon, &hd.SoHoaDon, &hd.NgayHoaDon,
+			&hd.ID, &companyContactID, &hd.TrangThaiHoaDon, &hd.LoaiHoaDon, &hd.SoHoaDon, &hd.KyHieu, &hd.NgayHoaDon,
 			&hd.MaSoThueNguoiBan, &hd.CongTy, &hd.DiaChi, &hd.LinkTraCuuHoaDon,
 			&hd.IDHoaDon, &hd.STTDongHang, &hd.TenHangHoa, &hd.MaHangHoa,
 			&hd.DonViTinh, &hd.SoLuong, &hd.DonGiaChuaThue, &hd.ThueSuatGTGT,
@@ -133,13 +134,14 @@ func (r *HoaDonRepository) GetByIDHoaDon(idHoaDon string) ([]HoaDon, error) {
 func (r *HoaDonRepository) SearchByKeyword(keyword string, limit, offset int) ([]HoaDon, error) {
 	query := `
 		SELECT 
-			id, company_contact_id, trang_thai_hoa_don, loai_hoa_don, so_hoa_don, ngay_hoa_don,
+			id, company_contact_id, trang_thai_hoa_don, loai_hoa_don, so_hoa_don, kyhieu, ngay_hoa_don,
 			ma_so_thue_nguoi_ban, cong_ty, dia_chi, link_tra_cuu_hoa_don,
 			id_hoa_don, stt_dong_hang, ten_hang_hoa, ma_hang_hoa,
 			don_vi_tinh, so_luong, don_gia_chua_thue, thue_suat_gtgt
 		FROM hoa_don
 		WHERE 
 			so_hoa_don LIKE ? OR
+			kyhieu LIKE ? OR
 			cong_ty LIKE ? OR
 			ten_hang_hoa LIKE ? OR
 			ma_hang_hoa LIKE ?
@@ -148,7 +150,7 @@ func (r *HoaDonRepository) SearchByKeyword(keyword string, limit, offset int) ([
 	`
 
 	searchTerm := "%" + keyword + "%"
-	rows, err := r.db.Query(query, searchTerm, searchTerm, searchTerm, searchTerm, limit, offset)
+	rows, err := r.db.Query(query, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +161,7 @@ func (r *HoaDonRepository) SearchByKeyword(keyword string, limit, offset int) ([
 		var hd HoaDon
 		var companyContactID sql.NullString
 		err := rows.Scan(
-			&hd.ID, &companyContactID, &hd.TrangThaiHoaDon, &hd.LoaiHoaDon, &hd.SoHoaDon, &hd.NgayHoaDon,
+			&hd.ID, &companyContactID, &hd.TrangThaiHoaDon, &hd.LoaiHoaDon, &hd.SoHoaDon, &hd.KyHieu, &hd.NgayHoaDon,
 			&hd.MaSoThueNguoiBan, &hd.CongTy, &hd.DiaChi, &hd.LinkTraCuuHoaDon,
 			&hd.IDHoaDon, &hd.STTDongHang, &hd.TenHangHoa, &hd.MaHangHoa,
 			&hd.DonViTinh, &hd.SoLuong, &hd.DonGiaChuaThue, &hd.ThueSuatGTGT,

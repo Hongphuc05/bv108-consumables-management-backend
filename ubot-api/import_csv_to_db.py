@@ -104,6 +104,33 @@ def _load_text_column_lengths(cursor, schema_name):
     return lengths
 
 
+def _column_exists(cursor, schema_name, table_name, column_name):
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = %s
+          AND TABLE_NAME = %s
+          AND COLUMN_NAME = %s
+        """,
+        (schema_name, table_name, column_name),
+    )
+    return cursor.fetchone()[0] > 0
+
+
+def ensure_hoa_don_schema(cursor, schema_name):
+    if _column_exists(cursor, schema_name, 'hoa_don', 'kyhieu'):
+        return
+
+    print("[IMPORT] Adding missing column hoa_don.kyhieu ...")
+    cursor.execute(
+        """
+        ALTER TABLE hoa_don
+        ADD COLUMN kyhieu VARCHAR(255) NULL AFTER so_hoa_don
+        """
+    )
+
+
 def _fit_text(value, column_name, text_lengths):
     """Trim text to column size to avoid insertion failures."""
     if value is None:
@@ -128,6 +155,7 @@ def import_csv_to_database(csv_file='invoices_export.csv', clear_existing=True):
         print(f"[IMPORT] Connecting to database {DB_CONFIG['database']}...")
         conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor()
+        ensure_hoa_don_schema(cursor, DB_CONFIG['database'])
         text_lengths = _load_text_column_lengths(cursor, DB_CONFIG['database'])
 
         # Äá»c file CSV vÃ  parse trÆ°á»›c. KhÃ´ng xÃ³a dá»¯ liá»‡u cá»§ nÃªu CSV rá»—ng/lá»—i.
@@ -148,6 +176,7 @@ def import_csv_to_database(csv_file='invoices_export.csv', clear_existing=True):
                         _fit_text(_get_csv_value(row, header_index, ['Trang thai hoa don', 'Trạng thái hóa đơn']), 'trang_thai_hoa_don', text_lengths),
                         _fit_text(_get_csv_value(row, header_index, ['Loai hoa don', 'Loại hóa đơn']), 'loai_hoa_don', text_lengths),
                         _fit_text(_get_csv_value(row, header_index, ['So hoa don', 'Số hóa đơn']), 'so_hoa_don', text_lengths),
+                        _fit_text(_get_csv_value(row, header_index, ['Ky hieu', 'Ký hiệu']), 'kyhieu', text_lengths),
                         invoice_date,
                         _fit_text(_get_csv_value(row, header_index, ['Ma so thue nguoi ban', 'Mã số thuế người bán']), 'ma_so_thue_nguoi_ban', text_lengths),
                         _fit_text(_get_csv_value(row, header_index, ['Cong ty', 'Công ty']), 'cong_ty', text_lengths),
@@ -175,12 +204,12 @@ def import_csv_to_database(csv_file='invoices_export.csv', clear_existing=True):
             # SQL insert - sá»­ dá»¥ng tÃªn cá»™t tiáº¿ng Viá»‡t theo báº£ng thá»±c táº¿
             insert_sql = """
                 INSERT INTO hoa_don (
-                    trang_thai_hoa_don, loai_hoa_don, so_hoa_don, ngay_hoa_don,
+                    trang_thai_hoa_don, loai_hoa_don, so_hoa_don, kyhieu, ngay_hoa_don,
                     ma_so_thue_nguoi_ban, cong_ty, dia_chi, link_tra_cuu_hoa_don,
                     id_hoa_don, stt_dong_hang, ten_hang_hoa, ma_hang_hoa,
                     don_vi_tinh, so_luong, don_gia_chua_thue, thue_suat_gtgt
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
             """
 

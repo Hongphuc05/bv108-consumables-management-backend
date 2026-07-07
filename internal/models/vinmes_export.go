@@ -14,12 +14,10 @@ const (
 	defaultVinmesNguon     = "Mua"
 	defaultVinmesLoaiPhieu = "Thanh toán"
 	defaultVinmesKyHieu    = "không hiểu"
+	defaultVinmesGoiThau   = "không thấy"
 )
 
-var tenderReferencePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)(?:quyết định|quyet dinh|qđ|qd)\s*số[:\s]*([0-9]+(?:/[[:alnum:]Đđ-]+)?)`),
-	regexp.MustCompile(`(?i)(?:quyết định|quyet dinh|qđ|qd)[^\d]{0,12}([0-9]+(?:/[[:alnum:]Đđ-]+)?)`),
-}
+var tenderCodePattern = regexp.MustCompile(`\b(9528|9530|9532|9534)\b`)
 
 type VinmesExportFilter struct {
 	Month        int
@@ -36,6 +34,7 @@ type VinmesExportSource struct {
 	InvoiceRowID     *int64
 	InvoiceIDHoaDon  string
 	InvoiceNumber    string
+	InvoiceKyHieu    string
 	InvoiceDate      *time.Time
 	InvoiceItemCode  string
 	InvoiceItemName  string
@@ -73,19 +72,30 @@ func (r *InvoiceReconciliationRepository) ListVinmesExportSources(filter VinmesE
 			r.order_batch_key,
 			r.invoice_row_id,
 			r.invoice_id_hoa_don,
-			COALESCE(NULLIF(r.invoice_number, ''), NULLIF(h.so_hoa_don, '')) AS invoice_number,
-			COALESCE(h.ngay_hoa_don, r.invoice_time) AS invoice_date,
-			COALESCE(NULLIF(r.invoice_item_code, ''), NULLIF(h.ma_hang_hoa, '')) AS invoice_item_code,
-			COALESCE(NULLIF(r.invoice_item_name, ''), NULLIF(h.ten_hang_hoa, '')) AS invoice_item_name,
+			COALESCE(NULLIF(r.invoice_number, ''), NULLIF(h_row.so_hoa_don, ''), NULLIF(h_invoice.so_hoa_don, '')) AS invoice_number,
+			COALESCE(NULLIF(h_row.kyhieu, ''), NULLIF(h_invoice.kyhieu, ''), '') AS invoice_ky_hieu,
+			COALESCE(h_row.ngay_hoa_don, h_invoice.ngay_hoa_don, r.invoice_time) AS invoice_date,
+			COALESCE(NULLIF(r.invoice_item_code, ''), NULLIF(h_row.ma_hang_hoa, '')) AS invoice_item_code,
+			COALESCE(NULLIF(r.invoice_item_name, ''), NULLIF(h_row.ten_hang_hoa, '')) AS invoice_item_name,
 			CASE
 				WHEN r.invoice_qty > 0 THEN r.invoice_qty
-				ELSE COALESCE(h.so_luong, 0)
+				ELSE COALESCE(h_row.so_luong, 0)
 			END AS invoice_qty,
-			h.thue_suat_gtgt,
-			COALESCE(NULLIF(r.invoice_company_name, ''), NULLIF(h.cong_ty, ''), NULLIF(r.nha_thau, '')) AS supplier_name,
+			h_row.thue_suat_gtgt,
+			COALESCE(NULLIF(r.invoice_company_name, ''), NULLIF(h_row.cong_ty, ''), NULLIF(h_invoice.cong_ty, ''), NULLIF(r.nha_thau, '')) AS supplier_name,
 			r.matched_at
 		FROM order_invoice_reconciliation r
-		LEFT JOIN hoa_don h ON h.id = r.invoice_row_id
+		LEFT JOIN hoa_don h_row ON h_row.id = r.invoice_row_id
+		LEFT JOIN (
+			SELECT
+				id_hoa_don,
+				MAX(so_hoa_don) AS so_hoa_don,
+				MAX(kyhieu) AS kyhieu,
+				MAX(ngay_hoa_don) AS ngay_hoa_don,
+				MAX(cong_ty) AS cong_ty
+			FROM hoa_don
+			GROUP BY id_hoa_don
+		) h_invoice ON h_invoice.id_hoa_don = r.invoice_id_hoa_don
 		WHERE r.has_invoice = 1
 		  AND r.status IN (?, ?)
 	`)
@@ -105,7 +115,7 @@ func (r *InvoiceReconciliationRepository) ListVinmesExportSources(filter VinmesE
 		queryBuilder.WriteString(`
 		  AND (
 			LOWER(TRIM(COALESCE(r.invoice_item_code, ''))) = ?
-			OR LOWER(TRIM(COALESCE(h.ma_hang_hoa, ''))) = ?
+			OR LOWER(TRIM(COALESCE(h_row.ma_hang_hoa, ''))) = ?
 			OR LOWER(TRIM(COALESCE(r.ma_vtyt_cu, ''))) = ?
 		  )
 		`)
@@ -146,6 +156,7 @@ func (r *InvoiceReconciliationRepository) ListVinmesExportSources(filter VinmesE
 			&invoiceRowID,
 			&item.InvoiceIDHoaDon,
 			&item.InvoiceNumber,
+			&item.InvoiceKyHieu,
 			&invoiceDate,
 			&item.InvoiceItemCode,
 			&item.InvoiceItemName,
@@ -194,7 +205,7 @@ func BuildVinmesExportItem(source VinmesExportSource) VinmesExportItem {
 		LoaiPhieu:        defaultVinmesLoaiPhieu,
 		SoPhieu:          buildVinmesRequestNumber(source.ReconciliationID, source.MatchedAt),
 		NgayYeuCau:       formatVinmesDate(source.MatchedAt),
-		KyHieu:           defaultVinmesKyHieu,
+		KyHieu:           fallbackVinmesKyHieu(source.InvoiceKyHieu),
 		SoHoaDon:         strings.TrimSpace(source.InvoiceNumber),
 		NgayHoaDon:       invoiceDate,
 		Thue:             formatVinmesTaxRate(source.InvoiceTaxRate),
@@ -206,23 +217,26 @@ func BuildVinmesExportItem(source VinmesExportSource) VinmesExportItem {
 	}
 }
 
+func fallbackVinmesKyHieu(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return defaultVinmesKyHieu
+	}
+	return trimmed
+}
+
 func ExtractTenderReference(input string) string {
 	normalized := strings.TrimSpace(input)
 	if normalized == "" {
-		return defaultVinmesKyHieu
+		return defaultVinmesGoiThau
 	}
 
-	for _, pattern := range tenderReferencePatterns {
-		matches := pattern.FindStringSubmatch(normalized)
-		if len(matches) >= 2 {
-			value := strings.TrimSpace(matches[1])
-			if value != "" {
-				return value
-			}
-		}
+	matches := tenderCodePattern.FindStringSubmatch(normalized)
+	if len(matches) >= 2 {
+		return matches[1] + "/QĐ-BV"
 	}
 
-	return defaultVinmesKyHieu
+	return defaultVinmesGoiThau
 }
 
 func formatVinmesTaxRate(rate *float64) string {

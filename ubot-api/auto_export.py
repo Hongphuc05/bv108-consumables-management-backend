@@ -1,5 +1,5 @@
 """
-Auto-export script - Tự động lấy TẤT CẢ hóa đơn 3 ngày gần nhất
+Auto-export script - Tự động lấy TẤT CẢ hóa đơn từ đầu tháng đến hiện tại
 Dùng để gọi từ backend API
 """
 from export_invoices import export_all_invoices, save_to_csv
@@ -10,7 +10,7 @@ PASSWORD = "Bv108@123"
 IS_PRODUCTION = True
 
 try:
-    print("[AUTO_EXPORT] Starting invoice crawl for last 3 days...")
+    print("[AUTO_EXPORT] Starting invoice crawl for current month...")
     
     # Get ALL invoices (option 4)
     data = export_all_invoices(

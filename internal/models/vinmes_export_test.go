@@ -16,17 +16,22 @@ func TestExtractTenderReference(t *testing.T) {
 		{
 			name:     "quyet dinh full suffix",
 			input:    "[A00191] Theo hop dong so 1833 ngay 31/12/2025 va Quyet dinh so 9528/QD-BV ngay 25/12/2025",
-			expected: "9528/QD-BV",
+			expected: "9528/QĐ-BV",
 		},
 		{
 			name:     "qd short form",
 			input:    "(D06041) ... ( HD so 2063 ngay 31/12/2025 va QD so 9534 )",
-			expected: "9534",
+			expected: "9534/QĐ-BV",
 		},
 		{
 			name:     "missing tender",
 			input:    "Vat tu khong co thong tin goi thau",
-			expected: defaultVinmesKyHieu,
+			expected: defaultVinmesGoiThau,
+		},
+		{
+			name:     "ignore unsupported code",
+			input:    "Theo quyet dinh so 9529/QD-BV",
+			expected: defaultVinmesGoiThau,
 		},
 	}
 
@@ -71,6 +76,9 @@ func TestBuildVinmesExportItem(t *testing.T) {
 	}
 	if item.NgayHoaDon != "29/06/2026" {
 		t.Fatalf("unexpected ngayHoaDon: %s", item.NgayHoaDon)
+	}
+	if item.GoiThau != "9534/QĐ-BV" {
+		t.Fatalf("unexpected goiThau: %s", item.GoiThau)
 	}
 	if item.Thue != "5%" {
 		t.Fatalf("unexpected thue: %s", item.Thue)
