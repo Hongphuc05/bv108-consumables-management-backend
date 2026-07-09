@@ -8,6 +8,28 @@ import re
 from datetime import datetime
 
 
+TENDER_CODE_PATTERN = re.compile(r"\b(?:9528|9530|9532|9534)\b")
+TENDER_HINT_PATTERN = re.compile(
+    r"(?:q\s*[đd]|quy[\s;_-]*[ếe]?t[\s;_-]*đ?[\s;_-]*[ií]?nh|h[\s;_-]*đ|h[\s;_-]*d|h[ợo][\s;_-]*p[\s;_-]*đ[ồo]ng)",
+    re.IGNORECASE,
+)
+
+
+def normalize_invoice_text(value):
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def contains_tender_reference(value):
+    normalized = normalize_invoice_text(value)
+    if not normalized:
+        return False
+
+    if not TENDER_CODE_PATTERN.search(normalized):
+        return False
+
+    return bool(TENDER_HINT_PATTERN.search(normalized))
+
+
 def is_valid_item(item):
     """
     Kiểm tra xem có phải hàng hóa thật hay chỉ là dòng ghi chú
@@ -29,6 +51,39 @@ def is_valid_item(item):
         return True
     
     return True
+
+
+def build_invoice_context(items):
+    """
+    Gom các dòng ghi chú của cùng hóa đơn để dùng làm ngữ cảnh suy ra gói thầu.
+    Ví dụ: hãng sản xuất, nước sản xuất, dòng "(Theo HĐ ... và QĐ số ...)".
+    """
+    context_parts = []
+    seen = set()
+
+    def sort_key(item):
+        order_no = item.get("itemOrderNo")
+        if isinstance(order_no, (int, float)):
+            return (0, float(order_no))
+        return (1, str(order_no or ""))
+
+    for item in sorted(items, key=sort_key):
+        item_name = normalize_invoice_text(item.get("itemName"))
+        item_qty = item.get("itemQuantity") or 0
+        item_price = item.get("itemPrice") or 0
+
+        if not item_name:
+            continue
+        is_note_line = item_qty == 0 and item_price == 0
+        if not is_note_line and not contains_tender_reference(item_name):
+            continue
+        if item_name in seen:
+            continue
+
+        seen.add(item_name)
+        context_parts.append(item_name)
+
+    return " | ".join(context_parts)
 
 
 def extract_item_code(item_name):
@@ -112,6 +167,8 @@ def export_invoices_to_format(
         invoice_id = invoice.get("invoiceId", "")
         ubot_link = f"https://portal.ubot.vn/api/invoices/{invoice_id}/pdf/blob" if invoice_id else ""
         ky_hieu = f"{invoice.get('modelNo') or ''}{invoice.get('serial') or ''}".strip()
+        items = invoice.get("invoiceItems", [])
+        invoice_context = build_invoice_context(items)
         
         # Thông tin chung của hóa đơn
         invoice_info = {
@@ -124,10 +181,8 @@ def export_invoices_to_format(
             "Địa chỉ": invoice.get("sellerAddress"),
             "Link tra cứu hóa đơn": ubot_link,
             "Id của hóa đơn": invoice_id,
+            "Ngữ cảnh hóa đơn": invoice_context,
         }
-        
-        # Lấy danh sách hàng hóa
-        items = invoice.get("invoiceItems", [])
         
         if items:
             # Lọc chỉ lấy hàng hóa thật, bỏ qua dòng ghi chú

@@ -119,16 +119,23 @@ def _column_exists(cursor, schema_name, table_name, column_name):
 
 
 def ensure_hoa_don_schema(cursor, schema_name):
-    if _column_exists(cursor, schema_name, 'hoa_don', 'kyhieu'):
-        return
+    if not _column_exists(cursor, schema_name, 'hoa_don', 'kyhieu'):
+        print("[IMPORT] Adding missing column hoa_don.kyhieu ...")
+        cursor.execute(
+            """
+            ALTER TABLE hoa_don
+            ADD COLUMN kyhieu VARCHAR(255) NULL AFTER so_hoa_don
+            """
+        )
 
-    print("[IMPORT] Adding missing column hoa_don.kyhieu ...")
-    cursor.execute(
-        """
-        ALTER TABLE hoa_don
-        ADD COLUMN kyhieu VARCHAR(255) NULL AFTER so_hoa_don
-        """
-    )
+    if not _column_exists(cursor, schema_name, 'hoa_don', 'invoice_context'):
+        print("[IMPORT] Adding missing column hoa_don.invoice_context ...")
+        cursor.execute(
+            """
+            ALTER TABLE hoa_don
+            ADD COLUMN invoice_context TEXT NULL AFTER ten_hang_hoa
+            """
+        )
 
 
 def _fit_text(value, column_name, text_lengths):
@@ -185,6 +192,7 @@ def import_csv_to_database(csv_file='invoices_export.csv', clear_existing=True):
                         _fit_text(_get_csv_value(row, header_index, ['Id cua hoa don', 'Id của hóa đơn']), 'id_hoa_don', text_lengths),
                         parse_int(_get_csv_value(row, header_index, ['STT dong hang', 'STT dòng hàng'])),
                         _fit_text(_get_csv_value(row, header_index, ['Ten hang hoa', 'Tên hàng hóa']), 'ten_hang_hoa', text_lengths),
+                        _fit_text(_get_csv_value(row, header_index, ['Ngu canh hoa don', 'Ngữ cảnh hóa đơn']), 'invoice_context', text_lengths),
                         _fit_text(_get_csv_value(row, header_index, ['Ma hang hoa', 'Mã hàng hóa']), 'ma_hang_hoa', text_lengths),
                         _fit_text(_get_csv_value(row, header_index, ['Don vi tinh', 'Đơn vị tính']), 'don_vi_tinh', text_lengths),
                         parse_float(_get_csv_value(row, header_index, ['So luong', 'Số lượng'])),
@@ -206,10 +214,10 @@ def import_csv_to_database(csv_file='invoices_export.csv', clear_existing=True):
                 INSERT INTO hoa_don (
                     trang_thai_hoa_don, loai_hoa_don, so_hoa_don, kyhieu, ngay_hoa_don,
                     ma_so_thue_nguoi_ban, cong_ty, dia_chi, link_tra_cuu_hoa_don,
-                    id_hoa_don, stt_dong_hang, ten_hang_hoa, ma_hang_hoa,
+                    id_hoa_don, stt_dong_hang, ten_hang_hoa, invoice_context, ma_hang_hoa,
                     don_vi_tinh, so_luong, don_gia_chua_thue, thue_suat_gtgt
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
             """
 
@@ -279,4 +287,3 @@ if __name__ == "__main__":
     print("-"*60)
     
     import_csv_to_database(csv_file, clear_existing)
-
