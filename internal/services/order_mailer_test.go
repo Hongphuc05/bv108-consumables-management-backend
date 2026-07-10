@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	gomail "github.com/wneessen/go-mail"
 )
 
 func TestRenderPlacedOrderEmailBody(t *testing.T) {
@@ -95,9 +97,55 @@ func TestResolveOrderPDFFontPathsUsesEnvOverride(t *testing.T) {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+func TestResolveSMTPTLSPolicy(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name  string
+		input string
+		want  gomail.TLSPolicy
+	}{
+		{name: "default mandatory", input: "", want: gomail.TLSMandatory},
+		{name: "mandatory explicit", input: "mandatory", want: gomail.TLSMandatory},
+		{name: "opportunistic", input: "opportunistic", want: gomail.TLSOpportunistic},
+		{name: "no tls", input: "NoTLS", want: gomail.NoTLS},
+		{name: "none alias", input: "none", want: gomail.NoTLS},
+		{name: "unknown falls back", input: "weird", want: gomail.TLSMandatory},
 	}
-	return b
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := resolveSMTPTLSPolicy(tc.input)
+			if got != tc.want {
+				t.Fatalf("resolveSMTPTLSPolicy(%q) = %v, want %v", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNewSMTPOrderMailerNormalizesConfig(t *testing.T) {
+	mailer := NewSMTPOrderMailer(SMTPOrderMailerConfig{
+		Host:        " smtp.example.com ",
+		Port:        " 587 ",
+		Username:    " user@example.com ",
+		AppPassword: " ab cd ef ",
+		From:        " sender@example.com ",
+		TLSPolicy:   " opportunistic ",
+	})
+
+	if mailer.host != "smtp.example.com" || mailer.port != "587" {
+		t.Fatalf("unexpected endpoint %q:%q", mailer.host, mailer.port)
+	}
+	if mailer.username != "user@example.com" || mailer.appPassword != "abcdef" {
+		t.Fatal("SMTP credentials were not normalized")
+	}
+	if mailer.from != "sender@example.com" {
+		t.Fatalf("from = %q", mailer.from)
+	}
+	if mailer.tlsPolicy != gomail.TLSOpportunistic {
+		t.Fatalf("tlsPolicy = %v", mailer.tlsPolicy)
+	}
 }

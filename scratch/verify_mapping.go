@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 package main
 
 import (
@@ -31,11 +34,11 @@ func main() {
 	`)
 
 	var (
-		idx1                                                                                                   int
-		productID, tonDauKy, nhapTrongKy, xuatTrongKy, tongNhap, tonKhoMin                                     interface{}
+		idx1                                                                                                       int
+		productID, tonDauKy, nhapTrongKy, xuatTrongKy, tongNhap, tonKhoMin                                         interface{}
 		groupName, id, idx2, maHieu, typeName, name, unit, quyCachDongGoi, quyCachGiaoHang, thongTinThau, tongThau interface{}
-		hangSX, nuocSX, nhaCungCap                                                                             interface{}
-		price                                                                                                  float64
+		hangSX, nuocSX, nhaCungCap                                                                                 interface{}
+		price                                                                                                      float64
 	)
 
 	err := row.Scan(
@@ -61,7 +64,7 @@ func main() {
 		"UNIT":               unit,
 		"QUY_CACH_DONG_GOI":  quyCachDongGoi,
 		"QUY_CACH_GIAO_HANG": quyCachGiaoHang,
-		"THONG_TIN_THAU":    thongTinThau,
+		"THONG_TIN_THAU":     thongTinThau,
 		"TONGTHAU":           tongThau,
 		"HANGSX":             hangSX,
 		"NUOC_SX":            nuocSX,
