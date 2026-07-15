@@ -12,6 +12,17 @@ import (
 )
 
 func (h *OrderHandler) GetExportToVinmes(c *gin.Context) {
+	currentUser, err := h.getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+
+	if !canViewInvoiceWorkflowRole(currentUser.Role) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Authenticated users with a valid operational role can export Vinmes reconciliation data"})
+		return
+	}
+
 	if h.invoiceMatchRepo == nil {
 		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "UNAVAILABLE", Message: "Invoice reconciliation repository is not configured"})
 		return

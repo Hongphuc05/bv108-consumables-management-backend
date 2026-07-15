@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 package main
 
 import (
@@ -54,11 +57,11 @@ func main() {
 		var id int64
 		var username, email, role string
 		rows.Scan(&id, &username, &email, &role)
-		
+
 		// Get assignment count for this user
 		var userAssigns int
 		database.DB.QueryRow("SELECT COUNT(*) FROM supply_user_assignments WHERE user_id = ?", id).Scan(&userAssigns)
-		
+
 		fmt.Printf("- ID=%d: %s (%s) - Role=%s - Assigned supplies=%d\n", id, username, email, role, userAssigns)
 	}
 }

@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 package main
 
 import (
@@ -23,7 +26,7 @@ func main() {
 
 	supplyRepo := models.NewSupplyRepository(database.DB)
 	companyContactRepo := models.NewCompanyContactRepository(database.DB)
-	
+
 	syncService := services.NewInternalSupplySyncService(config.AppConfig, supplyRepo, companyContactRepo)
 
 	fmt.Println("Starting sync service manually...")

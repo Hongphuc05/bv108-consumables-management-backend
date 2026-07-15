@@ -21,13 +21,15 @@ import (
 const demoSeedUsername = "vinmes_demo_seed"
 const vinmesDemoCSVPathEnvKey = "VINMES_DEMO_CSV_PATH"
 const vinmesDemoLimitEnvKey = "VINMES_DEMO_LIMIT"
-const defaultVinmesDemoLimit = 24
+const defaultVinmesDemoLimit = 1000
+const demoMissingItemCode = "-"
 
 type csvInvoiceRow struct {
 	TrangThaiHoaDon  string
 	LoaiHoaDon       string
 	SoHoaDon         string
 	KyHieu           string
+	InvoiceContext   string
 	NgayHoaDon       time.Time
 	MaSoThueNguoiBan string
 	CongTy           string
@@ -184,8 +186,8 @@ func resolveDemoLimit() (int, error) {
 		return 0, fmt.Errorf("%s must be a positive integer", vinmesDemoLimitEnvKey)
 	}
 
-	if value > 200 {
-		value = 200
+	if value > 5000 {
+		value = 5000
 	}
 
 	return value, nil
@@ -281,13 +283,14 @@ func loadCSVRows(csvPath string, limit int) ([]csvInvoiceRow, error) {
 		indexByName[name] = index
 	}
 
-	result := make([]csvInvoiceRow, 0, limit)
-	seenInvoiceRows := make(map[string]struct{}, limit)
+	capacity := limit
+	if capacity <= 0 {
+		capacity = len(rows) - 1
+	}
+	result := make([]csvInvoiceRow, 0, capacity)
+	seenInvoiceRows := make(map[string]struct{}, capacity)
 	for _, rawRow := range rows[1:] {
 		code := strings.TrimSpace(csvValue(rawRow, indexByName, "ma hang hoa"))
-		if code == "" {
-			continue
-		}
 
 		invoiceID := strings.TrimSpace(csvValue(rawRow, indexByName, "id cua hoa don"))
 		sttDongHangText := strings.TrimSpace(csvValue(rawRow, indexByName, "stt dong hang"))
@@ -325,11 +328,16 @@ func loadCSVRows(csvPath string, limit int) ([]csvInvoiceRow, error) {
 			return nil, fmt.Errorf("parse thue for %s: %w", code, err)
 		}
 
+		if code == "" {
+			code = demoMissingItemCode
+		}
+
 		result = append(result, csvInvoiceRow{
 			TrangThaiHoaDon:  strings.TrimSpace(csvValue(rawRow, indexByName, "trang thai hoa don")),
 			LoaiHoaDon:       strings.TrimSpace(csvValue(rawRow, indexByName, "loai hoa don")),
 			SoHoaDon:         strings.TrimSpace(csvValue(rawRow, indexByName, "so hoa don")),
 			KyHieu:           strings.TrimSpace(csvValue(rawRow, indexByName, "ky hieu")),
+			InvoiceContext:   strings.TrimSpace(csvValue(rawRow, indexByName, "ngu canh hoa don")),
 			NgayHoaDon:       ngayHoaDon,
 			MaSoThueNguoiBan: strings.TrimSpace(csvValue(rawRow, indexByName, "ma so thue nguoi ban")),
 			CongTy:           strings.TrimSpace(csvValue(rawRow, indexByName, "cong ty")),
@@ -346,7 +354,7 @@ func loadCSVRows(csvPath string, limit int) ([]csvInvoiceRow, error) {
 		})
 		seenInvoiceRows[uniqueKey] = struct{}{}
 
-		if len(result) >= limit {
+		if limit > 0 && len(result) >= limit {
 			break
 		}
 	}
@@ -445,6 +453,9 @@ func cleanupExistingDemoData(tx *sql.Tx) error {
 func ensureHoaDonRow(tx *sql.Tx, row csvInvoiceRow) (hoaDonRow, error) {
 	existing, err := findHoaDonRow(tx, row.IDHoaDon, row.STTDongHang)
 	if err == nil {
+		if strings.TrimSpace(existing.MaHangHoa) == "" && strings.TrimSpace(row.MaHangHoa) != "" {
+			existing.MaHangHoa = row.MaHangHoa
+		}
 		if strings.TrimSpace(existing.KyHieu) == "" && strings.TrimSpace(row.KyHieu) != "" {
 			if _, updateErr := tx.Exec(`
 				UPDATE hoa_don
@@ -454,6 +465,16 @@ func ensureHoaDonRow(tx *sql.Tx, row csvInvoiceRow) (hoaDonRow, error) {
 				return hoaDonRow{}, fmt.Errorf("update hoa_don kyhieu: %w", updateErr)
 			}
 			existing.KyHieu = row.KyHieu
+		}
+		if strings.TrimSpace(existing.InvoiceContext) == "" && strings.TrimSpace(row.InvoiceContext) != "" {
+			if _, updateErr := tx.Exec(`
+				UPDATE hoa_don
+				SET invoice_context = ?
+				WHERE id = ?
+			`, row.InvoiceContext, existing.ID); updateErr != nil {
+				return hoaDonRow{}, fmt.Errorf("update hoa_don invoice_context: %w", updateErr)
+			}
+			existing.InvoiceContext = row.InvoiceContext
 		}
 		return existing, nil
 	}
@@ -476,13 +497,14 @@ func ensureHoaDonRow(tx *sql.Tx, row csvInvoiceRow) (hoaDonRow, error) {
 			id_hoa_don,
 			stt_dong_hang,
 			ten_hang_hoa,
+			invoice_context,
 			ma_hang_hoa,
 			don_vi_tinh,
 			so_luong,
 			don_gia_chua_thue,
 			thue_suat_gtgt
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		nil,
 		row.TrangThaiHoaDon,
@@ -497,6 +519,7 @@ func ensureHoaDonRow(tx *sql.Tx, row csvInvoiceRow) (hoaDonRow, error) {
 		row.IDHoaDon,
 		row.STTDongHang,
 		row.TenHangHoa,
+		row.InvoiceContext,
 		row.MaHangHoa,
 		row.DonViTinh,
 		row.SoLuong,
@@ -532,6 +555,7 @@ func findHoaDonRow(tx *sql.Tx, invoiceID string, sttDongHang int) (hoaDonRow, er
 			id_hoa_don,
 			stt_dong_hang,
 			ten_hang_hoa,
+			invoice_context,
 			ma_hang_hoa,
 			don_vi_tinh,
 			so_luong,
@@ -554,6 +578,7 @@ func findHoaDonRow(tx *sql.Tx, invoiceID string, sttDongHang int) (hoaDonRow, er
 		&row.IDHoaDon,
 		&row.STTDongHang,
 		&row.TenHangHoa,
+		&row.InvoiceContext,
 		&row.MaHangHoa,
 		&row.DonViTinh,
 		&row.SoLuong,

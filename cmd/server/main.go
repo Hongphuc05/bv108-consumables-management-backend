@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -16,113 +15,32 @@ import (
 	"bv108-consumables-management-backend/internal/realtime"
 	"bv108-consumables-management-backend/internal/services"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
-
-type startupStep struct {
-	name string
-	run  func() error
-}
-
-func mustRunStartupStep(stepName string, fn func() error) {
-	startedAt := time.Now()
-	if err := fn(); err != nil {
-		log.Fatalf("%s failed: %v", stepName, err)
-	}
-	log.Printf("[startup] %s completed in %s", stepName, time.Since(startedAt).Round(time.Millisecond))
-}
-
-func mustRunStartupStepsParallel(steps ...startupStep) {
-	if len(steps) == 0 {
-		return
-	}
-
-	type startupError struct {
-		name string
-		err  error
-	}
-
-	var wg sync.WaitGroup
-	errCh := make(chan startupError, len(steps))
-
-	for _, step := range steps {
-		step := step
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			startedAt := time.Now()
-			if err := step.run(); err != nil {
-				errCh <- startupError{name: step.name, err: err}
-				return
-			}
-
-			log.Printf("[startup] %s completed in %s", step.name, time.Since(startedAt).Round(time.Millisecond))
-		}()
-	}
-
-	wg.Wait()
-	close(errCh)
-
-	if startupErr, ok := <-errCh; ok {
-		log.Fatalf("%s failed: %v", startupErr.name, startupErr.err)
-	}
-}
-
-func runCompanyContactWarmup(repo *models.CompanyContactRepository) {
-	startedAt := time.Now()
-	log.Println("[startup] company contact warmup started (background)")
-
-	if err := repo.SyncFromExistingData(models.ResolveDefaultCompanyContactEmail()); err != nil {
-		log.Printf("[startup] company contact warmup sync failed: %v", err)
-		return
-	}
-
-	if err := repo.BackfillOrderReferences(); err != nil {
-		log.Printf("[startup] company contact warmup backfill failed: %v", err)
-		return
-	}
-
-	log.Printf("[startup] company contact warmup completed in %s", time.Since(startedAt).Round(time.Millisecond))
-}
 
 func main() {
 	bootstrapStartedAt := time.Now()
 
-	// Load configuration
 	if err := config.LoadConfig(); err != nil {
 		log.Fatal("Failed to load configuration:", err)
 	}
-
-	// Set Gin mode
 	gin.SetMode(config.AppConfig.GinMode)
 
-	// Initialize database
 	if err := database.InitDB(); err != nil {
 		log.Fatal("Failed to initialize database:", err)
 	}
 	defer database.CloseDB()
 
-	// Initialize repository and handler
 	supplyRepo := models.NewSupplyRepository(database.DB)
 	userRepo := models.NewUserRepository(database.DB)
 	supplyTaskRepo := models.NewSupplyTaskRepository(database.DB)
-	supplyHandler := handlers.NewSupplyHandler(supplyRepo, userRepo, supplyTaskRepo, config.AppConfig.JWTSecret)
-	supplyTaskHandler := handlers.NewSupplyTaskHandler(supplyRepo, supplyTaskRepo, userRepo, config.AppConfig.JWTSecret)
-	authHandler := handlers.NewAuthHandler(
-		userRepo,
-		config.AppConfig.JWTSecret,
-		config.AppConfig.JWTExpiresHours,
-		config.AppConfig.JWTExpiresMinutes,
-	)
 	orderRepo := models.NewOrderRepository(database.DB)
 	invoiceMatchRepo := models.NewInvoiceReconciliationRepository(database.DB)
 	orderUnreadRepo := models.NewOrderUnreadRepository(database.DB)
 	companyContactRepo := models.NewCompanyContactRepository(database.DB)
 	forecastApprovalRepo := models.NewForecastApprovalRepository(database.DB)
 	schemaMaintenanceRepo := models.NewSchemaMaintenanceRepository(database.DB)
+	hoaDonRepo := models.NewHoaDonRepository(database.DB)
 
 	mustRunStartupStepsParallel(
 		startupStep{name: "order history schema", run: orderRepo.EnsureSchema},
@@ -134,145 +52,46 @@ func main() {
 	mustRunStartupStep("company contacts schema", companyContactRepo.EnsureSchema)
 	mustRunStartupStep("relational schema", schemaMaintenanceRepo.EnsureRelationalIntegrity)
 
-	orderMailer := services.NewSMTPOrderMailer(
-		config.AppConfig.SMTPHost,
-		config.AppConfig.SMTPPort,
-		config.AppConfig.SMTPUsername,
-		config.AppConfig.SMTPAppPassword,
-		config.AppConfig.SMTPFrom,
-	)
 	realtimeHub := realtime.NewHub()
-	wsHandler := handlers.NewWSHandler(userRepo, config.AppConfig.JWTSecret, realtimeHub, config.AppConfig.FrontendURL)
-	orderHandler := handlers.NewOrderHandler(orderRepo, invoiceMatchRepo, orderUnreadRepo, companyContactRepo, userRepo, config.AppConfig.JWTSecret, orderMailer, realtimeHub)
-	forecastApprovalHandler := handlers.NewForecastApprovalHandler(forecastApprovalRepo, userRepo, config.AppConfig.JWTSecret, realtimeHub)
-
-	hoaDonRepo := models.NewHoaDonRepository(database.DB)
-	hoaDonHandler := handlers.NewHoaDonHandler(hoaDonRepo, userRepo, config.AppConfig.JWTSecret)
-	refreshHandler := handlers.NewRefreshHandler(hoaDonRepo, userRepo, config.AppConfig.JWTSecret, realtimeHub)
-
+	orderMailer := services.NewSMTPOrderMailer(services.SMTPOrderMailerConfig{
+		Host:        config.AppConfig.SMTPHost,
+		Port:        config.AppConfig.SMTPPort,
+		Username:    config.AppConfig.SMTPUsername,
+		AppPassword: config.AppConfig.SMTPAppPassword,
+		From:        config.AppConfig.SMTPFrom,
+		TLSPolicy:   config.AppConfig.SMTPTLSPolicy,
+	})
 	internalSupplySyncService := services.NewInternalSupplySyncService(config.AppConfig, supplyRepo, companyContactRepo)
-	internalSupplySyncHandler := handlers.NewInternalSupplySyncHandler(
-		internalSupplySyncService,
-		userRepo,
-		config.AppConfig.JWTSecret,
-	)
-	geminiProxyService := services.NewGeminiProxyService(
-		config.AppConfig.GeminiAPIKey,
-		config.AppConfig.GeminiModel,
-		config.AppConfig.GeminiWebSearch,
-		config.AppConfig.GeminiMaxOutputTokens,
-	)
-	reportHandler := handlers.NewReportHandler(userRepo, config.AppConfig.JWTSecret, geminiProxyService)
+	geminiProxyService := services.NewGeminiProxyService(services.GeminiProxyConfig{
+		APIKey:          config.AppConfig.GeminiAPIKey,
+		Model:           config.AppConfig.GeminiModel,
+		APIBaseURL:      config.AppConfig.GeminiAPIBaseURL,
+		EnableWebSearch: config.AppConfig.GeminiWebSearch,
+		MaxOutputTokens: config.AppConfig.GeminiMaxOutputTokens,
+	})
+
+	router := newRouter(config.AppConfig.FrontendURL, apiHandlers{
+		auth: handlers.NewAuthHandler(
+			userRepo,
+			config.AppConfig.JWTSecret,
+			config.AppConfig.JWTExpiresHours,
+			config.AppConfig.JWTExpiresMinutes,
+		),
+		supplies:           handlers.NewSupplyHandler(supplyRepo, userRepo, supplyTaskRepo, config.AppConfig.JWTSecret),
+		supplyTasks:        handlers.NewSupplyTaskHandler(supplyRepo, supplyTaskRepo, userRepo, config.AppConfig.JWTSecret),
+		invoices:           handlers.NewHoaDonHandler(hoaDonRepo, userRepo, config.AppConfig.JWTSecret),
+		invoiceRefresh:     handlers.NewRefreshHandler(hoaDonRepo, userRepo, config.AppConfig.JWTSecret, realtimeHub),
+		internalSupplySync: handlers.NewInternalSupplySyncHandler(internalSupplySyncService, userRepo, config.AppConfig.JWTSecret),
+		orders:             handlers.NewOrderHandler(orderRepo, invoiceMatchRepo, orderUnreadRepo, companyContactRepo, userRepo, config.AppConfig.JWTSecret, orderMailer, realtimeHub),
+		forecastApprovals:  handlers.NewForecastApprovalHandler(forecastApprovalRepo, userRepo, config.AppConfig.JWTSecret, realtimeHub),
+		reports:            handlers.NewReportHandler(userRepo, config.AppConfig.JWTSecret, geminiProxyService),
+		websocket:          handlers.NewWSHandler(userRepo, config.AppConfig.JWTSecret, realtimeHub, config.AppConfig.FrontendURL),
+	})
+
 	backgroundCtx, cancelBackground := context.WithCancel(context.Background())
 	defer cancelBackground()
 	internalSupplySyncService.Start(backgroundCtx)
 
-	// Initialize Gin router
-	router := gin.Default()
-
-	// CORS middleware
-	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{config.AppConfig.FrontendURL, "http://localhost:5173", "http://localhost:5174", "http://localhost:3000"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
-	}))
-
-	// Health check route
-	router.GET("/health", handlers.HealthCheck)
-
-	// API routes
-	api := router.Group("/api")
-	{
-		api.GET("/ws", wsHandler.Handle)
-
-		auth := api.Group("/auth")
-		{
-			auth.POST("/register", authHandler.Register)
-			auth.POST("/login", authHandler.Login)
-			auth.GET("/profile", authHandler.GetProfile)
-			auth.PUT("/profile", authHandler.UpdateProfile)
-			auth.GET("/users", authHandler.ListManagedUsers)
-			auth.PUT("/users/:id/role", authHandler.UpdateManagedUserRole)
-			auth.PUT("/users/:id/password", authHandler.ResetManagedUserPassword)
-			auth.DELETE("/users/:id", authHandler.DeleteManagedUser)
-		}
-
-		supplies := api.Group("/supplies")
-		{
-			supplies.GET("", supplyHandler.GetAllSupplies)                         // GET /api/supplies?page=1&pageSize=20
-			supplies.GET("/search", supplyHandler.SearchSupplies)                  // GET /api/supplies/search?keyword=xxx
-			supplies.GET("/groups", supplyHandler.GetAllGroups)                    // GET /api/supplies/groups
-			supplies.GET("/group", supplyHandler.GetSuppliesByGroup)               // GET /api/supplies/group?groupName=xxx
-			supplies.GET("/low-stock", supplyHandler.GetLowStockSupplies)          // GET /api/supplies/low-stock?threshold=20
-			supplies.GET("/compare-level1", supplyHandler.GetCompareLevel1Options) // GET /api/supplies/compare-level1
-			supplies.GET("/compare-level2", supplyHandler.GetCompareLevel2Options) // GET /api/supplies/compare-level2?level1=xxx
-			supplies.GET("/compare-catalog", supplyHandler.GetCompareCatalog)      // GET /api/supplies/compare-catalog?page=1&pageSize=20&keyword=xxx&level1Filter=xxx&level2Filter=yyy
-			supplies.GET("/compare-export", supplyHandler.ExportCompareCatalogExcel)
-			supplies.POST("/compare-import", supplyHandler.ImportCompareCatalogExcel)
-			supplies.GET("/forecast-catalog", supplyHandler.GetForecastCatalog)
-			supplies.POST("/internal-sync", internalSupplySyncHandler.SyncNow)
-			supplies.POST("/compare", supplyHandler.CompareSupplies) // POST /api/supplies/compare
-			supplies.GET("/:id", supplyHandler.GetSupplyByID)        // GET /api/supplies/:id
-		}
-
-		supplyTasks := api.Group("/supply-tasks")
-		{
-			supplyTasks.GET("/state", supplyTaskHandler.GetState)
-			supplyTasks.GET("/catalog", supplyTaskHandler.GetSupplyCatalog)
-			supplyTasks.GET("/assignments", supplyTaskHandler.GetAssignmentsByUser)
-			supplyTasks.GET("/assignments/export", supplyTaskHandler.ExportAssignments)
-			supplyTasks.POST("/assignments/import", supplyTaskHandler.ImportAssignments)
-			supplyTasks.PUT("/visibility", supplyTaskHandler.UpdateVisibility)
-			supplyTasks.PUT("/assignments", supplyTaskHandler.UpdateAssignmentsByUser)
-		}
-
-		hoaDon := api.Group("/hoa-don")
-		{
-			hoaDon.GET("", hoaDonHandler.GetAllHoaDon)              // GET /api/hoa-don?limit=100&offset=0
-			hoaDon.GET("/search", hoaDonHandler.SearchHoaDon)       // GET /api/hoa-don/search?q=keyword
-			hoaDon.GET("/:id", hoaDonHandler.GetHoaDonByID)         // GET /api/hoa-don/:id
-			hoaDon.POST("/refresh", refreshHandler.RefreshInvoices) // POST /api/hoa-don/refresh
-		}
-
-		api.GET("/export-to-vinmes", orderHandler.GetExportToVinmes)
-
-		orders := api.Group("/orders")
-		{
-			orders.GET("/pending", orderHandler.GetPendingOrders)
-			orders.GET("/history", orderHandler.GetOrderHistory)
-			orders.GET("/invoice-reconciliations", orderHandler.GetInvoiceReconciliationHistory)
-			orders.GET("/invoice-reconciliations/matched-invoices", orderHandler.GetMatchedInvoiceNumbers)
-			orders.GET("/invoice-reconciliations/matched-orders", orderHandler.GetMatchedOrderReconciliations)
-			orders.GET("/company-contacts/search", orderHandler.SearchCompanyContacts)
-			orders.GET("/unread-snapshot", orderHandler.GetUnreadSnapshot)
-			orders.POST("/pending/forecast", orderHandler.CreateForecastOrders)
-			orders.POST("/pending/manual", orderHandler.CreateManualOrder)
-			orders.POST("/place", orderHandler.PlaceOrders)
-			orders.POST("/history/reorder", orderHandler.RepeatOrderHistory)
-			orders.POST("/invoice-reconciliations/upsert", orderHandler.UpsertInvoiceReconciliations)
-			orders.POST("/invoice-reconciliations/bulk", orderHandler.SaveInvoiceReconciliations)
-			orders.POST("/alerts/suppliers/seen", orderHandler.MarkSupplierAlertSeen)
-			orders.POST("/groups/seen", orderHandler.MarkGroupsSeen)
-		}
-
-		forecastApprovals := api.Group("/forecast-approvals")
-		{
-			forecastApprovals.GET("", forecastApprovalHandler.GetForecastApprovals)
-			forecastApprovals.GET("/history", forecastApprovalHandler.GetForecastChangeHistory)
-			forecastApprovals.GET("/monthly-history", forecastApprovalHandler.GetForecastMonthlyHistory)
-			forecastApprovals.POST("", forecastApprovalHandler.SaveForecastApproval)
-			forecastApprovals.POST("/bulk", forecastApprovalHandler.SaveForecastApprovalsBulk)
-		}
-
-		reports := api.Group("/reports")
-		{
-			reports.POST("/gemini-compare", reportHandler.GenerateGeminiCompare)
-		}
-	}
-
-	// Graceful shutdown
 	go func() {
 		if err := router.Run(":" + config.AppConfig.ServerPort); err != nil {
 			log.Fatal("Failed to start server:", err)
@@ -283,7 +102,6 @@ func main() {
 	log.Printf("API documentation available at http://localhost:%s/health", config.AppConfig.ServerPort)
 	log.Printf("[startup] bootstrap completed in %s", time.Since(bootstrapStartedAt).Round(time.Millisecond))
 
-	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

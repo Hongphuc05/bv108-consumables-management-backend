@@ -33,6 +33,11 @@ func TestExtractTenderReference(t *testing.T) {
 			input:    "Theo quyet dinh so 9529/QD-BV",
 			expected: defaultVinmesGoiThau,
 		},
+		{
+			name:     "extract from invoice context line",
+			input:    "[B001142.1] Nẹp 2.0mm, thẳng, dày 1mm Hãng sản xuất: AGOMED | Nước sản xuất: Đức | (Theo HĐ số 1864 Ngày 31/12/2025 và QĐ số 9530)",
+			expected: "9530/QĐ-BV",
+		},
 	}
 
 	for _, tc := range cases {
@@ -62,6 +67,7 @@ func TestBuildVinmesExportItem(t *testing.T) {
 		InvoiceDate:      &invoiceDate,
 		InvoiceItemCode:  "D06041",
 		InvoiceItemName:  "(D06041) ... QD so 9534",
+		InvoiceContext:   "Hãng sản xuất: Test | (Theo HĐ số 2063 ngày 31/12/2025 và QĐ số 9534)",
 		InvoiceQty:       19,
 		InvoiceTaxRate:   &tax,
 		SupplierName:     "MERINCO",

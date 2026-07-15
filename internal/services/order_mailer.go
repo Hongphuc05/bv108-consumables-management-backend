@@ -36,15 +36,26 @@ type SMTPOrderMailer struct {
 	username    string
 	appPassword string
 	from        string
+	tlsPolicy   gomail.TLSPolicy
 }
 
-func NewSMTPOrderMailer(host, port, username, appPassword, from string) *SMTPOrderMailer {
+type SMTPOrderMailerConfig struct {
+	Host        string
+	Port        string
+	Username    string
+	AppPassword string
+	From        string
+	TLSPolicy   string
+}
+
+func NewSMTPOrderMailer(cfg SMTPOrderMailerConfig) *SMTPOrderMailer {
 	return &SMTPOrderMailer{
-		host:        strings.TrimSpace(host),
-		port:        strings.TrimSpace(port),
-		username:    strings.TrimSpace(username),
-		appPassword: strings.ReplaceAll(strings.TrimSpace(appPassword), " ", ""),
-		from:        strings.TrimSpace(from),
+		host:        strings.TrimSpace(cfg.Host),
+		port:        strings.TrimSpace(cfg.Port),
+		username:    strings.TrimSpace(cfg.Username),
+		appPassword: strings.ReplaceAll(strings.TrimSpace(cfg.AppPassword), " ", ""),
+		from:        strings.TrimSpace(cfg.From),
+		tlsPolicy:   resolveSMTPTLSPolicy(cfg.TLSPolicy),
 	}
 }
 
@@ -81,8 +92,8 @@ func (m *SMTPOrderMailer) SendPlacedOrderEmail(recipientEmail, supplierName stri
 		return fmt.Errorf("invalid company email for %s: %s", supplierName, recipientEmail)
 	}
 
-	if m.host == "" || m.port == "" || m.username == "" || m.appPassword == "" || m.from == "" {
-		return fmt.Errorf("smtp is not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_APP_PASSWORD, and SMTP_FROM")
+	if m.host == "" || m.port == "" || m.from == "" {
+		return fmt.Errorf("smtp is not configured. Set SMTP_HOST, SMTP_PORT, and SMTP_FROM")
 	}
 
 	if _, err := stdmail.ParseAddress(m.from); err != nil {
@@ -101,14 +112,20 @@ func (m *SMTPOrderMailer) SendPlacedOrderEmail(recipientEmail, supplierName stri
 		return fmt.Errorf("invalid SMTP_PORT: %s", m.port)
 	}
 
-	client, err := gomail.NewClient(
-		m.host,
+	options := []gomail.Option{
 		gomail.WithPort(port),
-		gomail.WithTLSPolicy(gomail.TLSMandatory),
-		gomail.WithSMTPAuth(gomail.SMTPAuthPlain),
-		gomail.WithUsername(m.username),
-		gomail.WithPassword(m.appPassword),
-	)
+		gomail.WithTLSPolicy(m.tlsPolicy),
+	}
+
+	if m.username != "" || m.appPassword != "" {
+		options = append(options,
+			gomail.WithSMTPAuth(gomail.SMTPAuthPlain),
+			gomail.WithUsername(m.username),
+			gomail.WithPassword(m.appPassword),
+		)
+	}
+
+	client, err := gomail.NewClient(m.host, options...)
 	if err != nil {
 		return fmt.Errorf("error creating go-mail client: %w", err)
 	}
@@ -160,6 +177,17 @@ func (m *SMTPOrderMailer) SendPlacedOrderEmail(recipientEmail, supplierName stri
 	}
 
 	return nil
+}
+
+func resolveSMTPTLSPolicy(value string) gomail.TLSPolicy {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "opportunistic", "tlsopportunistic":
+		return gomail.TLSOpportunistic
+	case "notls", "no_tls", "none":
+		return gomail.NoTLS
+	default:
+		return gomail.TLSMandatory
+	}
 }
 
 type placedOrderDocumentData struct {
@@ -263,98 +291,9 @@ func renderPlacedOrderPDFHeader(pdf *gofpdf.Fpdf, data placedOrderDocumentData) 
 	pdf.Ln(orderPDFParagraphSpacing)
 }
 
-func renderPlacedOrderPDFTable(pdf *gofpdf.Fpdf, items []OrderEmailItem) {
-	leftMargin, _, _, _ := pdf.GetMargins()
-	_, pageHeight := pdf.GetPageSize()
-	bottomMargin := 15.0
-	tableWidths := []float64{12, 36, 23, 22, 44, 21, 17}
-	lineHeight := 5.5
-	cellPadding := 1.2
-
-	pdf.SetFont(orderPDFFontFamily, "B", orderPDFBodyFontSize)
-	pdf.MultiCell(0, orderPDFBodyLineHeight, "1. Danh sách vật tư đặt hàng:", "", "L", false)
-	pdf.Ln(orderPDFParagraphSpacing - 1)
-
-	drawTableHeader := func() {
-		drawValues := []string{"STT", "Tên vật tư", "Mã xuất\nhóa đơn", "Mã hiệu", "Hãng/ Nước\nsản xuất", "Đơn vị\ntính", "Số\nlượng"}
-		pdf.SetFont(orderPDFFontFamily, "B", orderPDFTableFontSize)
-		x := leftMargin
-		y := pdf.GetY()
-		for index, value := range drawValues {
-			width := tableWidths[index]
-			pdf.Rect(x, y, width, 12, "")
-			pdf.SetXY(x+cellPadding, y+cellPadding)
-			pdf.MultiCell(width-(cellPadding*2), 5.0, value, "", "L", false)
-			x += width
-			pdf.SetXY(x, y)
-		}
-		pdf.SetXY(leftMargin, y+12)
-	}
-
-	drawRow := func(values []string, bold bool) {
-		if bold {
-			pdf.SetFont(orderPDFFontFamily, "B", orderPDFTableFontSize)
-		} else {
-			pdf.SetFont(orderPDFFontFamily, "", orderPDFTableFontSize)
-		}
-
-		maxLineCount := 1
-		for index, value := range values {
-			lines := wrapOrderPDFTableText(pdf, value, tableWidths[index]-(cellPadding*2))
-			if len(lines) > maxLineCount {
-				maxLineCount = len(lines)
-			}
-		}
-
-		rowHeight := float64(maxLineCount)*lineHeight + (cellPadding * 2)
-		if pdf.GetY()+rowHeight > pageHeight-bottomMargin {
-			pdf.AddPage()
-			drawTableHeader()
-			if bold {
-				pdf.SetFont(orderPDFFontFamily, "B", orderPDFTableFontSize)
-			} else {
-				pdf.SetFont(orderPDFFontFamily, "", orderPDFTableFontSize)
-			}
-		}
-
-		x := leftMargin
-		y := pdf.GetY()
-		alignments := []string{"L", "L", "L", "L", "L", "L", "L"}
-
-		for index, value := range values {
-			width := tableWidths[index]
-			pdf.Rect(x, y, width, rowHeight, "")
-			pdf.SetXY(x+cellPadding, y+cellPadding)
-			pdf.MultiCell(width-(cellPadding*2), lineHeight, value, "", alignments[index], false)
-			x += width
-			pdf.SetXY(x, y)
-		}
-
-		pdf.SetXY(leftMargin, y+rowHeight)
-	}
-
-	drawTableHeader()
-
-	for _, item := range items {
-		drawRow([]string{
-			strconv.Itoa(item.Index),
-			nonEmptyPDFText(item.TenVatTu),
-			nonEmptyPDFText(item.MaXuatHoaDon),
-			nonEmptyPDFText(item.MaHieu),
-			nonEmptyPDFText(item.HangNuocSX),
-			nonEmptyPDFText(item.DonViTinh),
-			strconv.Itoa(item.SoLuong),
-		}, false)
-	}
-
-	if len(items) == 0 {
-		drawRow([]string{"1", "...", "...", "...", "...", "...", "..."}, false)
-	}
-
-	pdf.Ln(orderPDFSectionSpacing - 1)
-}
-
 func renderPlacedOrderPDFFooter(pdf *gofpdf.Fpdf, data placedOrderDocumentData) {
+	ensureOrderPDFVerticalSpace(pdf, 62)
+
 	pdf.SetFont(orderPDFFontFamily, "B", orderPDFBodyFontSize)
 	pdf.Write(orderPDFBodyLineHeight, "2. Thông tin liên hệ:")
 	pdf.SetFont(orderPDFFontFamily, "", orderPDFBodyFontSize)

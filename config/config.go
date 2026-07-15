@@ -22,6 +22,7 @@ type Config struct {
 	SMTPUsername                    string
 	SMTPAppPassword                 string
 	SMTPFrom                        string
+	SMTPTLSPolicy                   string
 	DefaultCompanyContactEmail      string
 	ServerPort                      string
 	GinMode                         string
@@ -41,6 +42,7 @@ type Config struct {
 	InternalSupplySyncRunOnStartup  bool
 	GeminiAPIKey                    string
 	GeminiModel                     string
+	GeminiAPIBaseURL                string
 	GeminiWebSearch                 bool
 	GeminiMaxOutputTokens           int
 	SupplyMappingTable              string
@@ -69,6 +71,7 @@ func LoadConfig() error {
 		SMTPUsername:                    getEnv("SMTP_USERNAME", ""),
 		SMTPAppPassword:                 getEnv("SMTP_APP_PASSWORD", ""),
 		SMTPFrom:                        getEnv("SMTP_FROM", getEnv("SMTP_USERNAME", "")),
+		SMTPTLSPolicy:                   getEnv("SMTP_TLS_POLICY", "mandatory"),
 		DefaultCompanyContactEmail:      getEnv("DEFAULT_COMPANY_CONTACT_EMAIL", getEnv("SMTP_FROM", getEnv("SMTP_USERNAME", ""))),
 		ServerPort:                      serverPort,
 		GinMode:                         getEnv("GIN_MODE", "debug"),
@@ -88,6 +91,7 @@ func LoadConfig() error {
 		InternalSupplySyncRunOnStartup:  getEnvAsBool("INTERNAL_SUPPLY_SYNC_RUN_ON_STARTUP", false),
 		GeminiAPIKey:                    getEnv("GEMINI_API_KEY", ""),
 		GeminiModel:                     getEnv("GEMINI_MODEL", "gemini-2.5-flash-lite"),
+		GeminiAPIBaseURL:                getEnv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"),
 		GeminiWebSearch:                 getEnvAsBool("GEMINI_WEB_SEARCH", false),
 		GeminiMaxOutputTokens:           getEnvAsInt("GEMINI_MAX_OUTPUT_TOKENS", 4096),
 		SupplyMappingTable:              getEnv("SUPPLY_MAPPING_TABLE", "mapping2"),
@@ -119,7 +123,7 @@ func (c *Config) GetDSN() string {
 }
 
 func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
+	if value, exists := os.LookupEnv(key); exists {
 		return value
 	}
 	return defaultValue

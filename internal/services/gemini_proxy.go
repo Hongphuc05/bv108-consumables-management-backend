@@ -6,11 +6,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
-const defaultGeminiTimeout = 60 * time.Second
+const (
+	defaultGeminiAPIBaseURL  = "https://generativelanguage.googleapis.com/v1beta"
+	defaultGeminiTimeout     = 60 * time.Second
+	defaultGeminiTemperature = 0.4
+)
 
 type GeminiTextPart struct {
 	Text string `json:"text"`
@@ -47,20 +52,46 @@ type GeminiProxyResponse struct {
 	} `json:"error,omitempty"`
 }
 
+type GeminiProxyConfig struct {
+	APIKey          string
+	Model           string
+	APIBaseURL      string
+	EnableWebSearch bool
+	MaxOutputTokens int
+}
+
+type geminiGenerationConfig struct {
+	Temperature     float64 `json:"temperature"`
+	MaxOutputTokens int     `json:"maxOutputTokens"`
+}
+
+type geminiGenerateRequest struct {
+	Contents         []GeminiContent        `json:"contents"`
+	GenerationConfig geminiGenerationConfig `json:"generationConfig"`
+	Tools            []map[string]any       `json:"tools,omitempty"`
+}
+
 type GeminiProxyService struct {
 	apiKey          string
 	model           string
+	apiBaseURL      string
 	enableWebSearch bool
 	maxOutputTokens int
 	httpClient      *http.Client
 }
 
-func NewGeminiProxyService(apiKey, model string, enableWebSearch bool, maxOutputTokens int) *GeminiProxyService {
+func NewGeminiProxyService(cfg GeminiProxyConfig) *GeminiProxyService {
+	apiBaseURL := strings.TrimRight(strings.TrimSpace(cfg.APIBaseURL), "/")
+	if apiBaseURL == "" {
+		apiBaseURL = defaultGeminiAPIBaseURL
+	}
+
 	return &GeminiProxyService{
-		apiKey:          strings.TrimSpace(apiKey),
-		model:           strings.TrimSpace(model),
-		enableWebSearch: enableWebSearch,
-		maxOutputTokens: maxOutputTokens,
+		apiKey:          strings.TrimSpace(cfg.APIKey),
+		model:           strings.TrimSpace(cfg.Model),
+		apiBaseURL:      apiBaseURL,
+		enableWebSearch: cfg.EnableWebSearch,
+		maxOutputTokens: cfg.MaxOutputTokens,
 		httpClient: &http.Client{
 			Timeout: defaultGeminiTimeout,
 		},
@@ -76,29 +107,12 @@ func (s *GeminiProxyService) GenerateContent(req GeminiProxyRequest) (*GeminiPro
 		return nil, http.StatusServiceUnavailable, fmt.Errorf("Gemini backend is not configured")
 	}
 
-	payload := map[string]any{
-		"contents": req.Contents,
-		"generationConfig": map[string]any{
-			"temperature":     0.4,
-			"maxOutputTokens": s.maxOutputTokens,
-		},
-	}
-
-	if s.enableWebSearch {
-		payload["tools"] = []map[string]any{{"google_search": map[string]any{}}}
-	}
-
-	rawPayload, err := json.Marshal(payload)
+	rawPayload, err := json.Marshal(s.buildGenerateRequest(req))
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
 
-	endpoint := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent",
-		s.model,
-	)
-
-	httpReq, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(rawPayload))
+	httpReq, err := http.NewRequest(http.MethodPost, s.generateContentURL(), bytes.NewReader(rawPayload))
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
@@ -112,26 +126,51 @@ func (s *GeminiProxyService) GenerateContent(req GeminiProxyRequest) (*GeminiPro
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	parsed, err := decodeGeminiResponse(resp.Body)
 	if err != nil {
 		return nil, http.StatusBadGateway, err
 	}
 
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, resp.StatusCode, geminiResponseError(parsed, resp.StatusCode)
+	}
+
+	return parsed, http.StatusOK, nil
+}
+
+func (s *GeminiProxyService) buildGenerateRequest(req GeminiProxyRequest) geminiGenerateRequest {
+	payload := geminiGenerateRequest{
+		Contents: req.Contents,
+		GenerationConfig: geminiGenerationConfig{
+			Temperature:     defaultGeminiTemperature,
+			MaxOutputTokens: s.maxOutputTokens,
+		},
+	}
+
+	if s.enableWebSearch {
+		payload.Tools = []map[string]any{{"google_search": map[string]any{}}}
+	}
+
+	return payload
+}
+
+func (s *GeminiProxyService) generateContentURL() string {
+	return fmt.Sprintf("%s/models/%s:generateContent", s.apiBaseURL, url.PathEscape(s.model))
+}
+
+func decodeGeminiResponse(body io.Reader) (*GeminiProxyResponse, error) {
 	var parsed GeminiProxyResponse
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil, http.StatusBadGateway, fmt.Errorf("Gemini returned invalid JSON")
+	if err := json.NewDecoder(body).Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("Gemini returned invalid JSON")
 	}
+	return &parsed, nil
+}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		message := ""
-		if parsed.Error != nil {
-			message = strings.TrimSpace(parsed.Error.Message)
+func geminiResponseError(resp *GeminiProxyResponse, statusCode int) error {
+	if resp.Error != nil {
+		if message := strings.TrimSpace(resp.Error.Message); message != "" {
+			return fmt.Errorf("%s", message)
 		}
-		if message == "" {
-			message = fmt.Sprintf("Gemini API lỗi (%d)", resp.StatusCode)
-		}
-		return nil, resp.StatusCode, fmt.Errorf("%s", message)
 	}
-
-	return &parsed, http.StatusOK, nil
+	return fmt.Errorf("Gemini API lỗi (%d)", statusCode)
 }

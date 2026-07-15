@@ -38,6 +38,7 @@ type VinmesExportSource struct {
 	InvoiceDate      *time.Time
 	InvoiceItemCode  string
 	InvoiceItemName  string
+	InvoiceContext   string
 	InvoiceQty       float64
 	InvoiceTaxRate   *float64
 	SupplierName     string
@@ -72,17 +73,18 @@ func (r *InvoiceReconciliationRepository) ListVinmesExportSources(filter VinmesE
 			r.order_batch_key,
 			r.invoice_row_id,
 			r.invoice_id_hoa_don,
-			COALESCE(NULLIF(r.invoice_number, ''), NULLIF(h_row.so_hoa_don, ''), NULLIF(h_invoice.so_hoa_don, '')) AS invoice_number,
+			COALESCE(NULLIF(r.invoice_number, ''), NULLIF(h_row.so_hoa_don, ''), NULLIF(h_invoice.so_hoa_don, ''), '') AS invoice_number,
 			COALESCE(NULLIF(h_row.kyhieu, ''), NULLIF(h_invoice.kyhieu, ''), '') AS invoice_ky_hieu,
 			COALESCE(h_row.ngay_hoa_don, h_invoice.ngay_hoa_don, r.invoice_time) AS invoice_date,
-			COALESCE(NULLIF(r.invoice_item_code, ''), NULLIF(h_row.ma_hang_hoa, '')) AS invoice_item_code,
-			COALESCE(NULLIF(r.invoice_item_name, ''), NULLIF(h_row.ten_hang_hoa, '')) AS invoice_item_name,
+			COALESCE(NULLIF(r.invoice_item_code, ''), NULLIF(h_row.ma_hang_hoa, ''), '') AS invoice_item_code,
+			COALESCE(NULLIF(r.invoice_item_name, ''), NULLIF(h_row.ten_hang_hoa, ''), '') AS invoice_item_name,
+			COALESCE(NULLIF(h_row.invoice_context, ''), NULLIF(h_invoice.invoice_context, ''), '') AS invoice_context,
 			CASE
 				WHEN r.invoice_qty > 0 THEN r.invoice_qty
 				ELSE COALESCE(h_row.so_luong, 0)
 			END AS invoice_qty,
 			h_row.thue_suat_gtgt,
-			COALESCE(NULLIF(r.invoice_company_name, ''), NULLIF(h_row.cong_ty, ''), NULLIF(h_invoice.cong_ty, ''), NULLIF(r.nha_thau, '')) AS supplier_name,
+			COALESCE(NULLIF(r.invoice_company_name, ''), NULLIF(h_row.cong_ty, ''), NULLIF(h_invoice.cong_ty, ''), NULLIF(r.nha_thau, ''), '') AS supplier_name,
 			r.matched_at
 		FROM order_invoice_reconciliation r
 		LEFT JOIN hoa_don h_row ON h_row.id = r.invoice_row_id
@@ -92,6 +94,7 @@ func (r *InvoiceReconciliationRepository) ListVinmesExportSources(filter VinmesE
 				MAX(so_hoa_don) AS so_hoa_don,
 				MAX(kyhieu) AS kyhieu,
 				MAX(ngay_hoa_don) AS ngay_hoa_don,
+				MAX(invoice_context) AS invoice_context,
 				MAX(cong_ty) AS cong_ty
 			FROM hoa_don
 			GROUP BY id_hoa_don
@@ -160,6 +163,7 @@ func (r *InvoiceReconciliationRepository) ListVinmesExportSources(filter VinmesE
 			&invoiceDate,
 			&item.InvoiceItemCode,
 			&item.InvoiceItemName,
+			&item.InvoiceContext,
 			&item.InvoiceQty,
 			&invoiceTaxRate,
 			&item.SupplierName,
@@ -198,7 +202,7 @@ func BuildVinmesExportItem(source VinmesExportSource) VinmesExportItem {
 	}
 
 	return VinmesExportItem{
-		GoiThau:          ExtractTenderReference(source.InvoiceItemName),
+		GoiThau:          ExtractTenderReference(buildTenderReferenceInput(source.InvoiceItemName, source.InvoiceContext)),
 		KhoHang:          defaultVinmesKhoHang,
 		Nguon:            defaultVinmesNguon,
 		NhaCungCap:       strings.TrimSpace(source.SupplierName),
@@ -223,6 +227,20 @@ func fallbackVinmesKyHieu(value string) string {
 		return defaultVinmesKyHieu
 	}
 	return trimmed
+}
+
+func buildTenderReferenceInput(itemName, invoiceContext string) string {
+	itemName = strings.TrimSpace(itemName)
+	invoiceContext = strings.TrimSpace(invoiceContext)
+
+	if itemName == "" {
+		return invoiceContext
+	}
+	if invoiceContext == "" {
+		return itemName
+	}
+
+	return itemName + " " + invoiceContext
 }
 
 func ExtractTenderReference(input string) string {
