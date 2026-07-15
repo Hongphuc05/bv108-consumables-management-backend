@@ -22,41 +22,51 @@ func main() {
 	}
 	defer database.CloseDB()
 
-	// Override config manually to test "mapping2" table mode
-	fmt.Println("--- OVERRIDING SUPPLY_MAPPING_TABLE TO 'mapping2' ---")
-	config.AppConfig.SupplyMappingTable = "mapping2"
-	os.Setenv("SUPPLY_MAPPING_TABLE", "mapping2")
-
 	supplyRepo := models.NewSupplyRepository(database.DB)
 	companyContactRepo := models.NewCompanyContactRepository(database.DB)
 
-	// Trigger sync
-	syncService := services.NewInternalSupplySyncService(config.AppConfig, supplyRepo, companyContactRepo)
-	count, err := syncService.RunOnce(context.Background())
-	if err != nil {
-		log.Fatalf("sync error: %v", err)
-	}
-	fmt.Printf("Sync completed. Total synced supplies: %d\n", count)
+	// Mode 1: mapping
+	fmt.Println("=== TESTING CONFIGURATION MODE: mapping ===")
+	config.AppConfig.SupplyMappingTable = "mapping"
+	os.Setenv("SUPPLY_MAPPING_TABLE", "mapping")
 
-	// Fetch fake items to check they are filled from the 'mapping' table
-	fmt.Println("\n--- CHECKING INJECTED TEST SUPPLIES IN DB (MAPPING MODE) ---")
-	testIDs := []string{"TEST001", "TEST002", "TEST003"}
-	for _, id := range testIDs {
-		var name, groupName, qcdg, qcgh, qctt, tt string
-		var tkm int
-		err = database.DB.QueryRow(`
-			SELECT NAME, GROUPNAME, QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, QUY_CACH_TOI_THIEU, TON_KHO_MIN, TONGTHAU 
-			FROM supplies WHERE ID = ?`, id).Scan(&name, &groupName, &qcdg, &qcgh, &qctt, &tkm, &tt)
-		if err != nil {
-			fmt.Printf("Error fetching %s: %v\n", id, err)
-			continue
-		}
-		fmt.Printf("ID: %s | Name: %q\n", id, name)
-		fmt.Printf("  * GROUPNAME: %q\n", groupName)
-		fmt.Printf("  * QUY_CACH_DONG_GOI: %q\n", qcdg)
-		fmt.Printf("  * QUY_CACH_GIAO_HANG: %q\n", qcgh)
-		fmt.Printf("  * QUY_CACH_TOI_THIEU: %q\n", qctt)
-		fmt.Printf("  * TON_KHO_MIN: %d\n", tkm)
-		fmt.Printf("  * TONGTHAU: %q (Should be empty in mapping table)\n", tt)
+	syncService1 := services.NewInternalSupplySyncService(config.AppConfig, supplyRepo, companyContactRepo)
+	_, err := syncService1.RunOnce(context.Background())
+	if err != nil {
+		log.Fatalf("sync mode mapping error: %v", err)
 	}
+
+	printSupplies("TEST001")
+
+	// Mode 2: mapping2
+	fmt.Println("\n=== TESTING CONFIGURATION MODE: mapping2 ===")
+	config.AppConfig.SupplyMappingTable = "mapping2"
+	os.Setenv("SUPPLY_MAPPING_TABLE", "mapping2")
+
+	syncService2 := services.NewInternalSupplySyncService(config.AppConfig, supplyRepo, companyContactRepo)
+	_, err = syncService2.RunOnce(context.Background())
+	if err != nil {
+		log.Fatalf("sync mode mapping2 error: %v", err)
+	}
+
+	printSupplies("TEST001")
+}
+
+func printSupplies(id string) {
+	var name, groupName, qcdg, qcgh, qctt, tt string
+	var tkm int
+	err := database.DB.QueryRow(`
+		SELECT NAME, GROUPNAME, QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, QUY_CACH_TOI_THIEU, TON_KHO_MIN, TONGTHAU 
+		FROM supplies WHERE ID = ?`, id).Scan(&name, &groupName, &qcdg, &qcgh, &qctt, &tkm, &tt)
+	if err != nil {
+		fmt.Printf("Error fetching %s: %v\n", id, err)
+		return
+	}
+	fmt.Printf("ID: %s | Name: %q\n", id, name)
+	fmt.Printf("  * GROUPNAME: %q\n", groupName)
+	fmt.Printf("  * QUY_CACH_DONG_GOI: %q\n", qcdg)
+	fmt.Printf("  * QUY_CACH_GIAO_HANG: %q\n", qcgh)
+	fmt.Printf("  * QUY_CACH_TOI_THIEU: %q\n", qctt)
+	fmt.Printf("  * TON_KHO_MIN: %d\n", tkm)
+	fmt.Printf("  * TONGTHAU: %q\n", tt)
 }

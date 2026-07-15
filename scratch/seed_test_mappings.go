@@ -27,11 +27,11 @@ func main() {
 
 	// 1. Insert into mapping table (typename_quyetdinh)
 	query1 := `
-		INSERT INTO mapping (typename_quyetdinh, GROUPNAME, QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, QUY_CACH_TOI_THIEU, TON_KHO_MIN)
+		INSERT INTO mapping (typename_quyetdinh, GROUPNAME, QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, QUY_CACH_TOI_THIEU, TON_KHO_MIN, tongthau)
 		VALUES 
-		('N99.99.999-999-991_TEST_QD_001', 'Nhóm Test 1 (Bảng mapping)', '10 Cái/Hộp', '1 Hộp', '1 Cái', '10'),
-		('N99.99.999-999-992_TEST_QD_002', 'Nhóm Test 2 (Bảng mapping)', '20 Hộp/Thùng', '1 Thùng', '1 Hộp', '20'),
-		('N99.99.999-999-993_TEST_QD_003', 'Nhóm Test 3 (Bảng mapping)', '50 Bộ/Kiện', '1 Kiện', '1 Bộ', '30')
+		('N99.99.999-999-991_TEST_QD_001', 'Nhóm Test 1 (Bảng mapping)', '10 Cái/Hộp', '1 Hộp', '1 Cái', '10', '100'),
+		('N99.99.999-999-992_TEST_QD_002', 'Nhóm Test 2 (Bảng mapping)', '20 Hộp/Thùng', '1 Thùng', '1 Hộp', '20', '200'),
+		('N99.99.999-999-993_TEST_QD_003', 'Nhóm Test 3 (Bảng mapping)', '50 Bộ/Kiện', '1 Kiện', '1 Bộ', '30', '300')
 	`
 	_, err = db.Exec(query1)
 	if err != nil {

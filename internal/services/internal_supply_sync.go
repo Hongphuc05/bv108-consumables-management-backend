@@ -257,7 +257,7 @@ func (s *InternalSupplySyncService) RunOnce(ctx context.Context) (int, error) {
 						input.TonKhoMin = val
 					}
 				}
-				if tableName == "mapping2" && input.TongThau == "" {
+				if input.TongThau == "" {
 					input.TongThau = m.TongThau
 				}
 			}

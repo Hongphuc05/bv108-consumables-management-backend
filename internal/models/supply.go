@@ -813,23 +813,14 @@ func (r *SupplyRepository) ReplaceAll(inputs []SupplyUpsertInput) error {
 		return nil
 	}
 
-	insertSQL := `
-		INSERT INTO supplies (
-			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT,
-			QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, QUY_CACH_TOI_THIEU, THONG_TIN_THAU, TONGTHAU,
-			HANGSX, NUOC_SX, NHA_CUNG_CAP, PRICE, TONDAUKY, NHAPTRONGKY,
-			XUATTRONGKY, TONGNHAP, TON_KHO_MIN
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-
-	stmt, err := tx.Prepare(insertSQL)
-	if err != nil {
-		return fmt.Errorf("error preparing supply refresh insert: %w", err)
-	}
-	defer stmt.Close()
+	// Optimize: Using Bulk Insert to insert all supplies in a single query execution
+	const numFields = 23
+	valueStrings := make([]string, 0, len(inputs))
+	valueArgs := make([]interface{}, 0, len(inputs)*numFields)
 
 	for _, input := range inputs {
-		if _, err = stmt.Exec(
+		valueStrings = append(valueStrings, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		valueArgs = append(valueArgs,
 			input.IDX1,
 			input.ProductID,
 			input.GroupName,
@@ -853,9 +844,19 @@ func (r *SupplyRepository) ReplaceAll(inputs []SupplyUpsertInput) error {
 			input.XuatTrongKy,
 			input.TongNhap,
 			input.TonKhoMin,
-		); err != nil {
-			return fmt.Errorf("error inserting refreshed supply %q: %w", input.ID, err)
-		}
+		)
+	}
+
+	bulkInsertSQL := fmt.Sprintf(`
+		INSERT INTO supplies (
+			IDX1, PRODUCTID, GROUPNAME, ID, IDX2, MA_HIEU, TYPENAME, NAME, UNIT,
+			QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, QUY_CACH_TOI_THIEU, THONG_TIN_THAU, TONGTHAU,
+			HANGSX, NUOC_SX, NHA_CUNG_CAP, PRICE, TONDAUKY, NHAPTRONGKY,
+			XUATTRONGKY, TONGNHAP, TON_KHO_MIN
+		) VALUES %s`, strings.Join(valueStrings, ","))
+
+	if _, err = tx.Exec(bulkInsertSQL, valueArgs...); err != nil {
+		return fmt.Errorf("error executing bulk insert: %w", err)
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -885,7 +886,7 @@ func (r *SupplyRepository) GetSupplyMappings(tableName string) (map[string]Suppl
 	var query string
 	if tableName == "mapping" {
 		query = `
-			SELECT typename_quyetdinh, GROUPNAME, QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, QUY_CACH_TOI_THIEU, TON_KHO_MIN 
+			SELECT typename_quyetdinh, GROUPNAME, QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, QUY_CACH_TOI_THIEU, TON_KHO_MIN, tongthau 
 			FROM mapping
 		`
 	} else {
@@ -904,18 +905,10 @@ func (r *SupplyRepository) GetSupplyMappings(tableName string) (map[string]Suppl
 	mappings := make(map[string]SupplyMapping)
 	for rows.Next() {
 		var m SupplyMapping
-		var idqd, groupName, qcdg, qcgh, qctt, tkm sql.NullString
+		var idqd, groupName, qcdg, qcgh, qctt, tkm, tt sql.NullString
 
-		if tableName == "mapping" {
-			if err := rows.Scan(&idqd, &groupName, &qcdg, &qcgh, &qctt, &tkm); err != nil {
-				return nil, fmt.Errorf("error scanning supply mapping: %w", err)
-			}
-		} else {
-			var tt sql.NullString
-			if err := rows.Scan(&idqd, &groupName, &qcdg, &qcgh, &qctt, &tkm, &tt); err != nil {
-				return nil, fmt.Errorf("error scanning supply mapping: %w", err)
-			}
-			m.TongThau = tt.String
+		if err := rows.Scan(&idqd, &groupName, &qcdg, &qcgh, &qctt, &tkm, &tt); err != nil {
+			return nil, fmt.Errorf("error scanning supply mapping: %w", err)
 		}
 
 		m.IDQuyetdinh = idqd.String
@@ -924,6 +917,7 @@ func (r *SupplyRepository) GetSupplyMappings(tableName string) (map[string]Suppl
 		m.QuyCachGiaoHang = qcgh.String
 		m.QuyCachToiThieu = qctt.String
 		m.TonKhoMin = tkm.String
+		m.TongThau = tt.String
 
 		key := cleanMappingKey(m.IDQuyetdinh)
 		if key != "" {
