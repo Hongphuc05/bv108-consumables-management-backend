@@ -42,6 +42,7 @@ func corsConfig(frontendURL string) cors.Config {
 func registerAPIRoutes(api *gin.RouterGroup, h apiHandlers) {
 	api.GET("/ws", h.websocket.Handle)
 	api.GET("/export-to-vinmes", h.orders.GetExportToVinmes)
+	api.GET("/export-to-vinmes/mapping-preview", h.orders.GetExportToVinmesMappingPreview)
 
 	registerAuthRoutes(api.Group("/auth"), h.auth)
 	registerSupplyRoutes(api.Group("/supplies"), h.supplies, h.internalSupplySync)

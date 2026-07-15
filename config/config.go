@@ -46,6 +46,9 @@ type Config struct {
 	GeminiWebSearch                 bool
 	GeminiMaxOutputTokens           int
 	SupplyMappingTable              string
+	VinmesAPIBaseURL                string
+	VinmesAPIToken                  string
+	VinmesAPITimeoutSeconds         int
 }
 
 var AppConfig *Config
@@ -95,6 +98,9 @@ func LoadConfig() error {
 		GeminiWebSearch:                 getEnvAsBool("GEMINI_WEB_SEARCH", false),
 		GeminiMaxOutputTokens:           getEnvAsInt("GEMINI_MAX_OUTPUT_TOKENS", 4096),
 		SupplyMappingTable:              getEnv("SUPPLY_MAPPING_TABLE", "mapping2"),
+		VinmesAPIBaseURL:                getEnv("VINMES_API_BASE_URL", "http://108.108.108.251/api/v1/resource"),
+		VinmesAPIToken:                  getEnv("VINMES_API_TOKEN", ""),
+		VinmesAPITimeoutSeconds:         getEnvAsInt("VINMES_API_TIMEOUT_SECONDS", 60),
 	}
 
 	return nil

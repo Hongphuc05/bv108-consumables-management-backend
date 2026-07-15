@@ -49,6 +49,7 @@ func main() {
 		startupStep{name: "forecast approval schema", run: forecastApprovalRepo.EnsureSchema},
 		startupStep{name: "supply task schema", run: supplyTaskRepo.EnsureSchema},
 	)
+	mustRunStartupStep("invoice export schema", schemaMaintenanceRepo.EnsureInvoiceExportSchema)
 	mustRunStartupStep("company contacts schema", companyContactRepo.EnsureSchema)
 	mustRunStartupStep("relational schema", schemaMaintenanceRepo.EnsureRelationalIntegrity)
 
@@ -69,6 +70,11 @@ func main() {
 		EnableWebSearch: config.AppConfig.GeminiWebSearch,
 		MaxOutputTokens: config.AppConfig.GeminiMaxOutputTokens,
 	})
+	vinmesCatalogService := services.NewVinmesCatalogService(services.VinmesCatalogConfig{
+		APIBaseURL:     config.AppConfig.VinmesAPIBaseURL,
+		APIToken:       config.AppConfig.VinmesAPIToken,
+		TimeoutSeconds: config.AppConfig.VinmesAPITimeoutSeconds,
+	})
 
 	router := newRouter(config.AppConfig.FrontendURL, apiHandlers{
 		auth: handlers.NewAuthHandler(
@@ -82,7 +88,7 @@ func main() {
 		invoices:           handlers.NewHoaDonHandler(hoaDonRepo, userRepo, config.AppConfig.JWTSecret),
 		invoiceRefresh:     handlers.NewRefreshHandler(hoaDonRepo, userRepo, config.AppConfig.JWTSecret, realtimeHub),
 		internalSupplySync: handlers.NewInternalSupplySyncHandler(internalSupplySyncService, userRepo, config.AppConfig.JWTSecret),
-		orders:             handlers.NewOrderHandler(orderRepo, invoiceMatchRepo, orderUnreadRepo, companyContactRepo, userRepo, config.AppConfig.JWTSecret, orderMailer, realtimeHub),
+		orders:             handlers.NewOrderHandler(orderRepo, invoiceMatchRepo, orderUnreadRepo, companyContactRepo, userRepo, config.AppConfig.JWTSecret, orderMailer, realtimeHub, vinmesCatalogService),
 		forecastApprovals:  handlers.NewForecastApprovalHandler(forecastApprovalRepo, userRepo, config.AppConfig.JWTSecret, realtimeHub),
 		reports:            handlers.NewReportHandler(userRepo, config.AppConfig.JWTSecret, geminiProxyService),
 		websocket:          handlers.NewWSHandler(userRepo, config.AppConfig.JWTSecret, realtimeHub, config.AppConfig.FrontendURL),

@@ -16,6 +16,36 @@ func NewSchemaMaintenanceRepository(db *sql.DB) *SchemaMaintenanceRepository {
 	return &SchemaMaintenanceRepository{DB: db}
 }
 
+func (r *SchemaMaintenanceRepository) EnsureInvoiceExportSchema() error {
+	exists, err := r.tableExists("hoa_don")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	var columnCount int
+	if err := r.DB.QueryRow(`
+		SELECT COUNT(*)
+		FROM information_schema.columns
+		WHERE table_schema = DATABASE()
+		  AND table_name = 'hoa_don'
+		  AND column_name = 'invoice_context'
+	`).Scan(&columnCount); err != nil {
+		return fmt.Errorf("error checking hoa_don.invoice_context: %w", err)
+	}
+	if columnCount > 0 {
+		return nil
+	}
+
+	if _, err := r.DB.Exec("ALTER TABLE hoa_don ADD COLUMN invoice_context TEXT NULL AFTER ten_hang_hoa"); err != nil {
+		return fmt.Errorf("error adding hoa_don.invoice_context: %w", err)
+	}
+
+	return nil
+}
+
 func (r *SchemaMaintenanceRepository) EnsureRelationalIntegrity() error {
 	if err := r.ensureMaintenanceStateTable(); err != nil {
 		return err

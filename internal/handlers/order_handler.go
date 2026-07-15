@@ -26,6 +26,7 @@ type OrderHandler struct {
 	jwtSecret          []byte
 	mailer             services.OrderEmailSender
 	hub                *realtime.Hub
+	vinmesCatalog      *services.VinmesCatalogService
 }
 
 type CreateForecastOrdersRequest struct {
@@ -99,7 +100,7 @@ type UpsertInvoiceReconciliationItemRequest struct {
 	Status                  string  `json:"status"`
 }
 
-func NewOrderHandler(repo *models.OrderRepository, invoiceMatchRepo *models.InvoiceReconciliationRepository, unreadRepo *models.OrderUnreadRepository, companyContactRepo *models.CompanyContactRepository, userRepo *models.UserRepository, jwtSecret string, mailer services.OrderEmailSender, hub *realtime.Hub) *OrderHandler {
+func NewOrderHandler(repo *models.OrderRepository, invoiceMatchRepo *models.InvoiceReconciliationRepository, unreadRepo *models.OrderUnreadRepository, companyContactRepo *models.CompanyContactRepository, userRepo *models.UserRepository, jwtSecret string, mailer services.OrderEmailSender, hub *realtime.Hub, vinmesCatalog *services.VinmesCatalogService) *OrderHandler {
 	return &OrderHandler{
 		repo:               repo,
 		invoiceMatchRepo:   invoiceMatchRepo,
@@ -109,6 +110,7 @@ func NewOrderHandler(repo *models.OrderRepository, invoiceMatchRepo *models.Invo
 		jwtSecret:          []byte(jwtSecret),
 		mailer:             mailer,
 		hub:                hub,
+		vinmesCatalog:      vinmesCatalog,
 	}
 }
 

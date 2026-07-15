@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	vinmesUserID           = "trangbi"
 	defaultVinmesKhoHang   = "Kho vật tư tiêu hao"
 	defaultVinmesNguon     = "Mua"
 	defaultVinmesLoaiPhieu = "Thanh toán"
@@ -28,40 +29,70 @@ type VinmesExportFilter struct {
 }
 
 type VinmesExportSource struct {
-	ReconciliationID int64
-	OrderHistoryID   int64
-	OrderBatchKey    string
-	InvoiceRowID     *int64
-	InvoiceIDHoaDon  string
-	InvoiceNumber    string
-	InvoiceKyHieu    string
-	InvoiceDate      *time.Time
-	InvoiceItemCode  string
-	InvoiceItemName  string
-	InvoiceContext   string
-	InvoiceQty       float64
-	InvoiceTaxRate   *float64
-	SupplierName     string
-	MatchedAt        time.Time
+	ReconciliationID    int64
+	OrderHistoryID      int64
+	OrderBatchKey       string
+	InvoiceRowID        *int64
+	InvoiceIDHoaDon     string
+	InvoiceNumber       string
+	InvoiceKyHieu       string
+	InvoiceDate         *time.Time
+	InvoiceItemCode     string
+	InvoiceItemName     string
+	InvoiceContext      string
+	InvoiceQty          float64
+	InvoiceTaxRate      *float64
+	SupplierName        string
+	SupplierTaxCode     string
+	SupplierBankAccount string
+	MatchedAt           time.Time
 }
 
 type VinmesExportItem struct {
-	GoiThau          string  `json:"goiThau"`
-	KhoHang          string  `json:"khoHang"`
-	Nguon            string  `json:"nguon"`
-	NhaCungCap       string  `json:"nhaCungCap"`
-	LoaiPhieu        string  `json:"loaiPhieu"`
-	SoPhieu          string  `json:"soPhieu"`
-	NgayYeuCau       string  `json:"ngayYeuCau"`
-	KyHieu           string  `json:"kyHieu"`
-	SoHoaDon         string  `json:"soHoaDon"`
-	NgayHoaDon       string  `json:"ngayHoaDon"`
-	Thue             string  `json:"thue"`
+	GoiThau                string  `json:"goiThau"`
+	KhoHang                string  `json:"khoHang"`
+	Nguon                  string  `json:"nguon"`
+	NhaCungCap             string  `json:"nhaCungCap"`
+	MaSoThueNhaCungCap     string  `json:"maSoThueNhaCungCap"`
+	SoTKNganHangNhaCungCap string  `json:"soTkNganHangNhaCungCap"`
+	LoaiPhieu              string  `json:"loaiPhieu"`
+	SoPhieu                string  `json:"soPhieu"`
+	NgayYeuCau             string  `json:"ngayYeuCau"`
+	KyHieu                 string  `json:"kyHieu"`
+	SoHoaDon               string  `json:"soHoaDon"`
+	NgayHoaDon             string  `json:"ngayHoaDon"`
+	Thue                   string  `json:"thue"`
+	MaHang                 string  `json:"maHang"`
+	TenHangHoa             string  `json:"tenHangHoa"`
+	SoLuong                float64 `json:"soLuong"`
+	ReconciliationID       int64   `json:"reconciliationId"`
+	OrderHistoryID         int64   `json:"orderHistoryId"`
+}
+
+type VinmesExportDetail struct {
 	MaHang           string  `json:"maHang"`
 	TenHangHoa       string  `json:"tenHangHoa"`
 	SoLuong          float64 `json:"soLuong"`
 	ReconciliationID int64   `json:"reconciliationId"`
 	OrderHistoryID   int64   `json:"orderHistoryId"`
+}
+
+type VinmesExportMaster struct {
+	UserID                 string               `json:"userId"`
+	GoiThau                string               `json:"goiThau"`
+	KhoHang                string               `json:"khoHang"`
+	Nguon                  string               `json:"nguon"`
+	NhaCungCap             string               `json:"nhaCungCap"`
+	MaSoThueNhaCungCap     string               `json:"maSoThueNhaCungCap"`
+	SoTKNganHangNhaCungCap string               `json:"soTkNganHangNhaCungCap"`
+	LoaiPhieu              string               `json:"loaiPhieu"`
+	SoPhieu                string               `json:"soPhieu"`
+	NgayYeuCau             string               `json:"ngayYeuCau"`
+	KyHieu                 string               `json:"kyHieu"`
+	SoHoaDon               string               `json:"soHoaDon"`
+	NgayHoaDon             string               `json:"ngayHoaDon"`
+	Thue                   string               `json:"thue"`
+	Details                []VinmesExportDetail `json:"details"`
 }
 
 func (r *InvoiceReconciliationRepository) ListVinmesExportSources(filter VinmesExportFilter) ([]VinmesExportSource, error) {
@@ -83,8 +114,10 @@ func (r *InvoiceReconciliationRepository) ListVinmesExportSources(filter VinmesE
 				WHEN r.invoice_qty > 0 THEN r.invoice_qty
 				ELSE COALESCE(h_row.so_luong, 0)
 			END AS invoice_qty,
-			h_row.thue_suat_gtgt,
+			COALESCE(h_row.thue_suat_gtgt, h_invoice.thue_suat_gtgt),
 			COALESCE(NULLIF(r.invoice_company_name, ''), NULLIF(h_row.cong_ty, ''), NULLIF(h_invoice.cong_ty, ''), NULLIF(r.nha_thau, ''), '') AS supplier_name,
+			COALESCE(NULLIF(h_row.ma_so_thue_nguoi_ban, ''), NULLIF(h_invoice.ma_so_thue_nguoi_ban, ''), NULLIF(r.invoice_company_contact_id, ''), '') AS supplier_tax_code,
+			COALESCE(NULLIF(c_supplier.so_tk_ngan_hang, ''), '') AS supplier_bank_account,
 			r.matched_at
 		FROM order_invoice_reconciliation r
 		LEFT JOIN hoa_don h_row ON h_row.id = r.invoice_row_id
@@ -95,10 +128,18 @@ func (r *InvoiceReconciliationRepository) ListVinmesExportSources(filter VinmesE
 				MAX(kyhieu) AS kyhieu,
 				MAX(ngay_hoa_don) AS ngay_hoa_don,
 				MAX(invoice_context) AS invoice_context,
-				MAX(cong_ty) AS cong_ty
+				MAX(cong_ty) AS cong_ty,
+				MAX(ma_so_thue_nguoi_ban) AS ma_so_thue_nguoi_ban,
+				MAX(thue_suat_gtgt) AS thue_suat_gtgt
 			FROM hoa_don
 			GROUP BY id_hoa_don
 		) h_invoice ON h_invoice.id_hoa_don = r.invoice_id_hoa_don
+		LEFT JOIN company_contacts c_supplier
+			ON c_supplier.ma_so_thue = COALESCE(
+				NULLIF(r.invoice_company_contact_id, ''),
+				NULLIF(h_row.ma_so_thue_nguoi_ban, ''),
+				NULLIF(h_invoice.ma_so_thue_nguoi_ban, '')
+			)
 		WHERE r.has_invoice = 1
 		  AND r.status IN (?, ?)
 	`)
@@ -167,6 +208,8 @@ func (r *InvoiceReconciliationRepository) ListVinmesExportSources(filter VinmesE
 			&item.InvoiceQty,
 			&invoiceTaxRate,
 			&item.SupplierName,
+			&item.SupplierTaxCode,
+			&item.SupplierBankAccount,
 			&item.MatchedAt,
 		); err != nil {
 			return nil, fmt.Errorf("error scanning vinmes export source: %w", err)
@@ -202,23 +245,98 @@ func BuildVinmesExportItem(source VinmesExportSource) VinmesExportItem {
 	}
 
 	return VinmesExportItem{
-		GoiThau:          ExtractTenderReference(buildTenderReferenceInput(source.InvoiceItemName, source.InvoiceContext)),
-		KhoHang:          defaultVinmesKhoHang,
-		Nguon:            defaultVinmesNguon,
-		NhaCungCap:       strings.TrimSpace(source.SupplierName),
-		LoaiPhieu:        defaultVinmesLoaiPhieu,
-		SoPhieu:          buildVinmesRequestNumber(source.ReconciliationID, source.MatchedAt),
-		NgayYeuCau:       formatVinmesDate(source.MatchedAt),
-		KyHieu:           fallbackVinmesKyHieu(source.InvoiceKyHieu),
-		SoHoaDon:         strings.TrimSpace(source.InvoiceNumber),
-		NgayHoaDon:       invoiceDate,
-		Thue:             formatVinmesTaxRate(source.InvoiceTaxRate),
-		MaHang:           strings.TrimSpace(source.InvoiceItemCode),
-		TenHangHoa:       strings.TrimSpace(source.InvoiceItemName),
-		SoLuong:          source.InvoiceQty,
-		ReconciliationID: source.ReconciliationID,
-		OrderHistoryID:   source.OrderHistoryID,
+		GoiThau:                ExtractTenderReference(buildTenderReferenceInput(source.InvoiceItemName, source.InvoiceContext)),
+		KhoHang:                defaultVinmesKhoHang,
+		Nguon:                  defaultVinmesNguon,
+		NhaCungCap:             strings.TrimSpace(source.SupplierName),
+		MaSoThueNhaCungCap:     strings.TrimSpace(source.SupplierTaxCode),
+		SoTKNganHangNhaCungCap: strings.TrimSpace(source.SupplierBankAccount),
+		LoaiPhieu:              defaultVinmesLoaiPhieu,
+		SoPhieu:                buildVinmesRequestNumber(source.ReconciliationID, source.MatchedAt),
+		NgayYeuCau:             formatVinmesDate(source.MatchedAt),
+		KyHieu:                 fallbackVinmesKyHieu(source.InvoiceKyHieu),
+		SoHoaDon:               strings.TrimSpace(source.InvoiceNumber),
+		NgayHoaDon:             invoiceDate,
+		Thue:                   formatVinmesTaxRate(source.InvoiceTaxRate),
+		MaHang:                 strings.TrimSpace(source.InvoiceItemCode),
+		TenHangHoa:             strings.TrimSpace(source.InvoiceItemName),
+		SoLuong:                source.InvoiceQty,
+		ReconciliationID:       source.ReconciliationID,
+		OrderHistoryID:         source.OrderHistoryID,
 	}
+}
+
+func BuildVinmesExportMasters(sources []VinmesExportSource) []VinmesExportMaster {
+	masters := make([]VinmesExportMaster, 0)
+	masterIndexes := make(map[string]int)
+
+	for _, source := range sources {
+		item := BuildVinmesExportItem(source)
+		groupKey := vinmesInvoiceGroupKey(source, item)
+		masterIndex, exists := masterIndexes[groupKey]
+		if !exists {
+			masterIndex = len(masters)
+			masterIndexes[groupKey] = masterIndex
+			masters = append(masters, VinmesExportMaster{
+				UserID:                 vinmesUserID,
+				GoiThau:                item.GoiThau,
+				KhoHang:                item.KhoHang,
+				Nguon:                  item.Nguon,
+				NhaCungCap:             item.NhaCungCap,
+				MaSoThueNhaCungCap:     item.MaSoThueNhaCungCap,
+				SoTKNganHangNhaCungCap: item.SoTKNganHangNhaCungCap,
+				LoaiPhieu:              item.LoaiPhieu,
+				SoPhieu:                item.SoPhieu,
+				NgayYeuCau:             item.NgayYeuCau,
+				KyHieu:                 item.KyHieu,
+				SoHoaDon:               item.SoHoaDon,
+				NgayHoaDon:             item.NgayHoaDon,
+				Thue:                   item.Thue,
+				Details:                make([]VinmesExportDetail, 0, 1),
+			})
+		}
+
+		master := &masters[masterIndex]
+		if master.GoiThau == defaultVinmesGoiThau && item.GoiThau != defaultVinmesGoiThau {
+			master.GoiThau = item.GoiThau
+		}
+		master.Details = append(master.Details, VinmesExportDetail{
+			MaHang:           item.MaHang,
+			TenHangHoa:       item.TenHangHoa,
+			SoLuong:          item.SoLuong,
+			ReconciliationID: item.ReconciliationID,
+			OrderHistoryID:   item.OrderHistoryID,
+		})
+	}
+
+	return masters
+}
+
+func vinmesInvoiceGroupKey(source VinmesExportSource, item VinmesExportItem) string {
+	if invoiceID := strings.TrimSpace(source.InvoiceIDHoaDon); invoiceID != "" {
+		return "invoice-id:" + invoiceID
+	}
+
+	supplierKey := strings.ToLower(strings.TrimSpace(item.MaSoThueNhaCungCap))
+	if supplierKey == "" {
+		supplierKey = strings.ToLower(strings.TrimSpace(item.SoTKNganHangNhaCungCap))
+	}
+	if supplierKey == "" {
+		supplierKey = strings.ToLower(strings.TrimSpace(item.NhaCungCap))
+	}
+
+	parts := []string{
+		supplierKey,
+		strings.ToLower(strings.TrimSpace(item.SoHoaDon)),
+		strings.ToLower(strings.TrimSpace(item.KyHieu)),
+		item.NgayHoaDon,
+	}
+	key := strings.Join(parts, "|")
+	if strings.Trim(key, "|") == "" {
+		return fmt.Sprintf("reconciliation:%d", source.ReconciliationID)
+	}
+
+	return "invoice-fields:" + key
 }
 
 func fallbackVinmesKyHieu(value string) string {

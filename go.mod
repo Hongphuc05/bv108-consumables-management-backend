@@ -11,7 +11,9 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/phpdave11/gofpdf v1.4.3
 	github.com/wneessen/go-mail v0.7.2
+	github.com/xuri/excelize/v2 v2.9.1
 	golang.org/x/crypto v0.38.0
+	golang.org/x/text v0.29.0
 )
 
 require (
@@ -38,12 +40,10 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.11 // indirect
 	github.com/xuri/efp v0.0.1 // indirect
-	github.com/xuri/excelize/v2 v2.9.1 // indirect
 	github.com/xuri/nfp v0.0.1 // indirect
 	golang.org/x/arch v0.5.0 // indirect
 	golang.org/x/net v0.40.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/text v0.29.0 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

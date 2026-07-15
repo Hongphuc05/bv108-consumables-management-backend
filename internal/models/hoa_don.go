@@ -8,7 +8,7 @@ import (
 // HoaDon represents an invoice record from UBot
 type HoaDon struct {
 	ID               int       `json:"id"`
-	CompanyContactID *string    `json:"companyContactId,omitempty"`
+	CompanyContactID *string   `json:"companyContactId,omitempty"`
 	TrangThaiHoaDon  string    `json:"trangThaiHoaDon"`
 	LoaiHoaDon       string    `json:"loaiHoaDon"`
 	SoHoaDon         string    `json:"soHoaDon"`
@@ -21,6 +21,7 @@ type HoaDon struct {
 	IDHoaDon         string    `json:"idHoaDon"`
 	STTDongHang      int       `json:"sttDongHang"`
 	TenHangHoa       string    `json:"tenHangHoa"`
+	InvoiceContext   string    `json:"invoiceContext"`
 	MaHangHoa        string    `json:"maHangHoa"`
 	DonViTinh        string    `json:"donViTinh"`
 	SoLuong          float64   `json:"soLuong"`
@@ -44,7 +45,7 @@ func (r *HoaDonRepository) GetAll(limit, offset int) ([]HoaDon, error) {
 		SELECT 
 			id, company_contact_id, trang_thai_hoa_don, loai_hoa_don, so_hoa_don, kyhieu, ngay_hoa_don,
 			ma_so_thue_nguoi_ban, cong_ty, dia_chi, link_tra_cuu_hoa_don,
-			id_hoa_don, stt_dong_hang, ten_hang_hoa, ma_hang_hoa,
+			id_hoa_don, stt_dong_hang, ten_hang_hoa, COALESCE(invoice_context, ''), ma_hang_hoa,
 			don_vi_tinh, so_luong, don_gia_chua_thue, thue_suat_gtgt
 		FROM hoa_don
 		ORDER BY ngay_hoa_don DESC, id DESC
@@ -64,7 +65,7 @@ func (r *HoaDonRepository) GetAll(limit, offset int) ([]HoaDon, error) {
 		err := rows.Scan(
 			&hd.ID, &companyContactID, &hd.TrangThaiHoaDon, &hd.LoaiHoaDon, &hd.SoHoaDon, &hd.KyHieu, &hd.NgayHoaDon,
 			&hd.MaSoThueNguoiBan, &hd.CongTy, &hd.DiaChi, &hd.LinkTraCuuHoaDon,
-			&hd.IDHoaDon, &hd.STTDongHang, &hd.TenHangHoa, &hd.MaHangHoa,
+			&hd.IDHoaDon, &hd.STTDongHang, &hd.TenHangHoa, &hd.InvoiceContext, &hd.MaHangHoa,
 			&hd.DonViTinh, &hd.SoLuong, &hd.DonGiaChuaThue, &hd.ThueSuatGTGT,
 		)
 		if err != nil {
@@ -94,7 +95,7 @@ func (r *HoaDonRepository) GetByIDHoaDon(idHoaDon string) ([]HoaDon, error) {
 		SELECT 
 			id, company_contact_id, trang_thai_hoa_don, loai_hoa_don, so_hoa_don, kyhieu, ngay_hoa_don,
 			ma_so_thue_nguoi_ban, cong_ty, dia_chi, link_tra_cuu_hoa_don,
-			id_hoa_don, stt_dong_hang, ten_hang_hoa, ma_hang_hoa,
+			id_hoa_don, stt_dong_hang, ten_hang_hoa, COALESCE(invoice_context, ''), ma_hang_hoa,
 			don_vi_tinh, so_luong, don_gia_chua_thue, thue_suat_gtgt
 		FROM hoa_don
 		WHERE id_hoa_don = ?
@@ -114,7 +115,7 @@ func (r *HoaDonRepository) GetByIDHoaDon(idHoaDon string) ([]HoaDon, error) {
 		err := rows.Scan(
 			&hd.ID, &companyContactID, &hd.TrangThaiHoaDon, &hd.LoaiHoaDon, &hd.SoHoaDon, &hd.KyHieu, &hd.NgayHoaDon,
 			&hd.MaSoThueNguoiBan, &hd.CongTy, &hd.DiaChi, &hd.LinkTraCuuHoaDon,
-			&hd.IDHoaDon, &hd.STTDongHang, &hd.TenHangHoa, &hd.MaHangHoa,
+			&hd.IDHoaDon, &hd.STTDongHang, &hd.TenHangHoa, &hd.InvoiceContext, &hd.MaHangHoa,
 			&hd.DonViTinh, &hd.SoLuong, &hd.DonGiaChuaThue, &hd.ThueSuatGTGT,
 		)
 		if err != nil {
@@ -136,7 +137,7 @@ func (r *HoaDonRepository) SearchByKeyword(keyword string, limit, offset int) ([
 		SELECT 
 			id, company_contact_id, trang_thai_hoa_don, loai_hoa_don, so_hoa_don, kyhieu, ngay_hoa_don,
 			ma_so_thue_nguoi_ban, cong_ty, dia_chi, link_tra_cuu_hoa_don,
-			id_hoa_don, stt_dong_hang, ten_hang_hoa, ma_hang_hoa,
+			id_hoa_don, stt_dong_hang, ten_hang_hoa, COALESCE(invoice_context, ''), ma_hang_hoa,
 			don_vi_tinh, so_luong, don_gia_chua_thue, thue_suat_gtgt
 		FROM hoa_don
 		WHERE 
@@ -163,7 +164,7 @@ func (r *HoaDonRepository) SearchByKeyword(keyword string, limit, offset int) ([
 		err := rows.Scan(
 			&hd.ID, &companyContactID, &hd.TrangThaiHoaDon, &hd.LoaiHoaDon, &hd.SoHoaDon, &hd.KyHieu, &hd.NgayHoaDon,
 			&hd.MaSoThueNguoiBan, &hd.CongTy, &hd.DiaChi, &hd.LinkTraCuuHoaDon,
-			&hd.IDHoaDon, &hd.STTDongHang, &hd.TenHangHoa, &hd.MaHangHoa,
+			&hd.IDHoaDon, &hd.STTDongHang, &hd.TenHangHoa, &hd.InvoiceContext, &hd.MaHangHoa,
 			&hd.DonViTinh, &hd.SoLuong, &hd.DonGiaChuaThue, &hd.ThueSuatGTGT,
 		)
 		if err != nil {
