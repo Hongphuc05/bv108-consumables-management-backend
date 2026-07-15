@@ -43,6 +43,7 @@ type Config struct {
 	GeminiModel                     string
 	GeminiWebSearch                 bool
 	GeminiMaxOutputTokens           int
+	SupplyMappingTable              string
 }
 
 var AppConfig *Config
@@ -89,6 +90,7 @@ func LoadConfig() error {
 		GeminiModel:                     getEnv("GEMINI_MODEL", "gemini-2.5-flash-lite"),
 		GeminiWebSearch:                 getEnvAsBool("GEMINI_WEB_SEARCH", false),
 		GeminiMaxOutputTokens:           getEnvAsInt("GEMINI_MAX_OUTPUT_TOKENS", 4096),
+		SupplyMappingTable:              getEnv("SUPPLY_MAPPING_TABLE", "mapping2"),
 	}
 
 	return nil

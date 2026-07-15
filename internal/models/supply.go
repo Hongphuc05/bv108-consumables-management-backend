@@ -864,3 +864,83 @@ func (r *SupplyRepository) ReplaceAll(inputs []SupplyUpsertInput) error {
 
 	return nil
 }
+
+// SupplyMapping represents a row in the mapping2 table
+type SupplyMapping struct {
+	IDQuyetdinh     string
+	GroupName       string
+	QuyCachDongGoi    string
+	QuyCachGiaoHang   string
+	QuyCachToiThieu   string
+	TonKhoMin         string
+	TongThau          string
+}
+
+// GetSupplyMappings returns a map of all supply mapping configurations from the specified table (mapping or mapping2).
+func (r *SupplyRepository) GetSupplyMappings(tableName string) (map[string]SupplyMapping, error) {
+	if tableName != "mapping" && tableName != "mapping2" {
+		tableName = "mapping2"
+	}
+
+	var query string
+	if tableName == "mapping" {
+		query = `
+			SELECT typename_quyetdinh, GROUPNAME, QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, QUY_CACH_TOI_THIEU, TON_KHO_MIN 
+			FROM mapping
+		`
+	} else {
+		query = `
+			SELECT ID_quyetdinh, GROUPNAME, QUY_CACH_DONG_GOI, QUY_CACH_GIAO_HANG, QUY_CACH_TOI_THIEU, TON_KHO_MIN, TONGTHAU 
+			FROM mapping2
+		`
+	}
+
+	rows, err := r.DB.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("error querying supply mappings: %w", err)
+	}
+	defer rows.Close()
+
+	mappings := make(map[string]SupplyMapping)
+	for rows.Next() {
+		var m SupplyMapping
+		var idqd, groupName, qcdg, qcgh, qctt, tkm sql.NullString
+
+		if tableName == "mapping" {
+			if err := rows.Scan(&idqd, &groupName, &qcdg, &qcgh, &qctt, &tkm); err != nil {
+				return nil, fmt.Errorf("error scanning supply mapping: %w", err)
+			}
+		} else {
+			var tt sql.NullString
+			if err := rows.Scan(&idqd, &groupName, &qcdg, &qcgh, &qctt, &tkm, &tt); err != nil {
+				return nil, fmt.Errorf("error scanning supply mapping: %w", err)
+			}
+			m.TongThau = tt.String
+		}
+
+		m.IDQuyetdinh = idqd.String
+		m.GroupName = groupName.String
+		m.QuyCachDongGoi = qcdg.String
+		m.QuyCachGiaoHang = qcgh.String
+		m.QuyCachToiThieu = qctt.String
+		m.TonKhoMin = tkm.String
+
+		key := cleanMappingKey(m.IDQuyetdinh)
+		if key != "" {
+			mappings[key] = m
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error reading supply mappings: %w", err)
+	}
+
+	return mappings, nil
+}
+
+func cleanMappingKey(key string) string {
+	key = strings.ReplaceAll(key, "Đ", "D")
+	key = strings.ReplaceAll(key, "đ", "d")
+	return strings.TrimSpace(key)
+}
+

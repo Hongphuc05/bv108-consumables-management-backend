@@ -77,3 +77,14 @@ func main() {
 		fmt.Println(string(itemJSON))
 	}
 }
+
+		fmt.Printf("Decision: %s -> Total items: %d\n", dec, len(dataList))
+		if len(dataList) > 0 {
+			fmt.Println("  First item keys:")
+			firstItem, _ := dataList[0].(map[string]interface{})
+			for k := range firstItem {
+				fmt.Printf("    * %s: %v\n", k, firstItem[k])
+			}
+		}
+	}
+}

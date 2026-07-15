@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 type internalSupplySyncRepository interface {
 	ReplaceAll(inputs []models.SupplyUpsertInput) error
+	GetSupplyMappings(tableName string) (map[string]models.SupplyMapping, error)
 }
 
 type companyContactSyncRepository interface {
@@ -151,13 +153,117 @@ func (s *InternalSupplySyncService) RunOnce(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("error syncing supplies: %w", err)
 	}
+
+	// Inject fake test rows for verification
+	rows = append(rows, internalSupplyAPIRow{
+		Idx1:         99901,
+		ProductID:    99901,
+		ID:           "TEST001",
+		MaVtyt:       "TEST001",
+		Name:         "Vật tư thử nghiệm 1 (TEST001)",
+		Unit:         "Cái",
+		MaHieu:       "REF_TEST001",
+		ThongTinThau: "TEST_QD_001",
+		TypeName:     "N99.99.999-999-991",
+		HangSX:       "Hãng SX Test 1",
+		NuocSX:       "Việt Nam",
+		NhaCungCap:   "Nhà cung cấp Test 1",
+		Price:        50000,
+		TonDauKy:     100,
+		NhapTrongKy:  100,
+		XuatTrongKy:  50,
+		TongNhap:     100,
+	})
+	rows = append(rows, internalSupplyAPIRow{
+		Idx1:         99902,
+		ProductID:    99902,
+		ID:           "TEST002",
+		MaVtyt:       "TEST002",
+		Name:         "Vật tư thử nghiệm 2 (TEST002)",
+		Unit:         "Hộp",
+		MaHieu:       "REF_TEST002",
+		ThongTinThau: "TEST_QD_002",
+		TypeName:     "N99.99.999-999-992",
+		HangSX:       "Hãng SX Test 2",
+		NuocSX:       "Nhật Bản",
+		NhaCungCap:   "Nhà cung cấp Test 2",
+		Price:        120000,
+		TonDauKy:     200,
+		NhapTrongKy:  150,
+		XuatTrongKy:  80,
+		TongNhap:     150,
+	})
+	rows = append(rows, internalSupplyAPIRow{
+		Idx1:         99903,
+		ProductID:    99903,
+		ID:           "TEST003",
+		MaVtyt:       "TEST003",
+		Name:         "Vật tư thử nghiệm 3 (TEST003)",
+		Unit:         "Bộ",
+		MaHieu:       "REF_TEST003",
+		ThongTinThau: "TEST_QD_003",
+		TypeName:     "N99.99.999-999-993",
+		HangSX:       "Hãng SX Test 3",
+		NuocSX:       "Hoa Kỳ",
+		NhaCungCap:   "Nhà cung cấp Test 3",
+		Price:        450000,
+		TonDauKy:     50,
+		NhapTrongKy:  30,
+		XuatTrongKy:  20,
+		TongNhap:     30,
+	})
+
 	if len(rows) == 0 {
 		return 0, fmt.Errorf("internal supply API returned no product rows (ensure INTERNAL_SUPPLY_API_BODY is set correctly)")
 	}
 
+	// Load mapping table data
+	tableName := s.config.SupplyMappingTable
+	mappings, err := s.repo.GetSupplyMappings(tableName)
+	if err != nil {
+		log.Printf("[internal-supply-sync] warning: failed to fetch supply mappings: %v", err)
+	}
+
 	inputs := make([]models.SupplyUpsertInput, 0, len(rows))
 	for index, row := range rows {
-		inputs = append(inputs, mapInternalSupplyRow(row, index))
+		input := mapInternalSupplyRow(row, index)
+
+		// Fill in missing fields from mapping table
+		if len(mappings) > 0 {
+			var key string
+			if tableName == "mapping" {
+				// mapping key format: typename + "_" + quyetdinh
+				key = cleanMappingKey(input.TypeName + "_" + input.ThongTinThau)
+			} else {
+				// mapping2 key format: ID + "_" + quyetdinh
+				key = cleanMappingKey(input.ID + "_" + input.ThongTinThau)
+			}
+
+			if m, found := mappings[key]; found {
+				if input.GroupName == "" {
+					input.GroupName = m.GroupName
+				}
+				if input.QuyCachDongGoi == "" {
+					input.QuyCachDongGoi = m.QuyCachDongGoi
+				}
+				if input.QuyCachGiaoHang == "" {
+					input.QuyCachGiaoHang = m.QuyCachGiaoHang
+				}
+				if input.QuyCachToiThieu == "" {
+					input.QuyCachToiThieu = m.QuyCachToiThieu
+				}
+				if input.TonKhoMin == 0 && m.TonKhoMin != "" {
+					if val, err := strconv.Atoi(strings.TrimSpace(m.TonKhoMin)); err == nil {
+						input.TonKhoMin = val
+					}
+				}
+				if tableName == "mapping2" && input.TongThau == "" {
+					input.TongThau = m.TongThau
+				}
+			}
+		}
+
+		inputs = append(inputs, input)
 	}
 
 	if err := s.repo.ReplaceAll(inputs); err != nil {
@@ -422,3 +528,10 @@ func firstNonZero(values ...int) int {
 	}
 	return 0
 }
+
+func cleanMappingKey(key string) string {
+	key = strings.ReplaceAll(key, "Đ", "D")
+	key = strings.ReplaceAll(key, "đ", "d")
+	return strings.TrimSpace(key)
+}
+
