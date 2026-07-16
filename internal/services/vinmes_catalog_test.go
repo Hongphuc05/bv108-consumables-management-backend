@@ -64,7 +64,7 @@ func TestVinmesMappingPreviewFallsBackToNormalizedPartnerName(t *testing.T) {
 	if item.Master.Binds.TaxID == nil || *item.Master.Binds.TaxID != 0 {
 		t.Fatalf("tax ID = %v", item.Master.Binds.TaxID)
 	}
-	if item.Master.Binds.ContractPackageID == nil || *item.Master.Binds.ContractPackageID != 9530 {
+	if item.Master.Binds.ContractPackageID == nil || *item.Master.Binds.ContractPackageID != 123 {
 		t.Fatalf("contract package ID = %v", item.Master.Binds.ContractPackageID)
 	}
 	if len(item.Details) != 1 || item.Details[0].Binds.ProductID == nil || *item.Details[0].Binds.ProductID != 12345 {
@@ -155,20 +155,53 @@ func TestVinmesMappingPreviewUsesBankAccountBeforeName(t *testing.T) {
 	}
 }
 
-func TestMapContractPackageSupportsVinmesPackage4418(t *testing.T) {
+func TestMapContractPackageUsesCatalogIDInsteadOfTenderReference(t *testing.T) {
 	t.Parallel()
 
 	mapped := VinmesMappedPurchaseOrder{}
 	mapContractPackage(
 		models.VinmesExportMaster{GoiThau: "4418/QĐ-BV"},
-		&vinmesCatalogs{ContractPackages: []vinmesContractPackage{{ID: "4418/QĐ-BV", Description: "4418/QĐ-BV"}}},
+		&vinmesCatalogs{ContractPackages: []vinmesContractPackage{{ID: "123", Description: "Quyết định 4418/QĐ-BV"}}},
 		&mapped,
 	)
-	if mapped.Master.Binds.ContractPackageID == nil || *mapped.Master.Binds.ContractPackageID != 4418 {
+	if mapped.Master.Binds.ContractPackageID == nil || *mapped.Master.Binds.ContractPackageID != 123 {
 		t.Fatalf("contract package ID = %v", mapped.Master.Binds.ContractPackageID)
 	}
 	if len(mapped.ValidationErrors) != 0 {
 		t.Fatalf("validation errors = %+v", mapped.ValidationErrors)
+	}
+}
+
+func TestMapContractPackageRejectsNonnumericCatalogID(t *testing.T) {
+	t.Parallel()
+
+	mapped := VinmesMappedPurchaseOrder{}
+	mapContractPackage(
+		models.VinmesExportMaster{GoiThau: "4418/QĐ-BV"},
+		&vinmesCatalogs{ContractPackages: []vinmesContractPackage{{ID: "QĐBV4418", Description: "Quyết định 4418/QĐ-BV"}}},
+		&mapped,
+	)
+	if mapped.Master.Binds.ContractPackageID != nil {
+		t.Fatalf("contract package ID = %v, want nil", mapped.Master.Binds.ContractPackageID)
+	}
+	if len(mapped.ValidationErrors) != 1 || mapped.ValidationErrors[0].Field != "p_contractpkg_id" {
+		t.Fatalf("validation errors = %+v", mapped.ValidationErrors)
+	}
+}
+
+func TestValidateRequiredVinmesCatalogsRejectsMissingRequiredData(t *testing.T) {
+	t.Parallel()
+
+	catalogs := &vinmesCatalogs{
+		Storages:         []vinmesStorage{{ID: 5}},
+		Partners:         []vinmesPartner{{ID: "partner"}},
+		Resources:        []vinmesResource{{ID: 1}},
+		Taxes:            []vinmesTax{{ID: 1}},
+		ContractPackages: []vinmesContractPackage{{ID: "123"}},
+		Products:         nil,
+	}
+	if err := validateRequiredVinmesCatalogs(catalogs); err == nil || !strings.Contains(err.Error(), "product_select_for_po") {
+		t.Fatalf("validateRequiredVinmesCatalogs() error = %v", err)
 	}
 }
 
@@ -264,7 +297,7 @@ func newVinmesCatalogTestServer(t *testing.T) *httptest.Server {
 		},
 		"resource_select_for_po":    []map[string]any{{"mpr_product_resource_id": 1, "mpr_name": "Mua"}},
 		"tax_select_for_po":         []map[string]any{{"adt_taxrate_id": 0, "adt_rate": 0}},
-		"contractpkg_select_for_po": []map[string]any{{"adcp_contract_package_id": "QĐBV9530", "adcp_description": "Quyết định 9530"}},
+		"contractpkg_select_for_po": []map[string]any{{"adcp_contract_package_id": "123", "adcp_description": "Quyết định 9530"}},
 		"contract_select_for_po":    []map[string]any{{"adc_contract_id": 101, "adc_contract_no": "HD-1"}},
 		"product_select_for_po":     []map[string]any{{"id": 12345, "code": "B001142.1", "name": "Nẹp 2.0mm"}},
 	}

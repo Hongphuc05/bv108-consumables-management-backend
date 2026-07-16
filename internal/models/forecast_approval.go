@@ -24,6 +24,7 @@ type ForecastApprovalRecord struct {
 	ForecastYear    int    `json:"forecastYear"`
 	MaQuanLy        string `json:"maQuanLy"`
 	MaVtytCu        string `json:"maVtytCu"`
+	MaterialCode    string `json:"materialCode"`
 	TenVtytBv       string `json:"tenVtytBv"`
 	Status          string `json:"status"`
 	LyDo            string `json:"lyDo,omitempty"`
@@ -54,6 +55,7 @@ type ForecastChangeHistoryRecord struct {
 	ForecastYear       int    `json:"forecastYear"`
 	MaQuanLy           string `json:"maQuanLy"`
 	MaVtytCu           string `json:"maVtytCu"`
+	MaterialCode       string `json:"materialCode"`
 	TenVtytBv          string `json:"tenVtytBv"`
 	ActionType         string `json:"actionType"`
 	StatusBefore       string `json:"statusBefore,omitempty"`
@@ -111,7 +113,7 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 			forecast_month INT NOT NULL,
 			forecast_year INT NOT NULL,
 			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
-			ma_vtyt_cu VARCHAR(255) NOT NULL,
+			ma_vtyt_cu VARCHAR(255) NOT NULL DEFAULT '',
 			ten_vtyt_bv VARCHAR(500) NOT NULL,
 			status VARCHAR(32) NOT NULL,
 			ly_do TEXT NULL,
@@ -124,7 +126,7 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 			PRIMARY KEY (id),
-			UNIQUE KEY uk_forecast_approvals_period_item (forecast_year, forecast_month, ma_vtyt_cu),
+			UNIQUE KEY uk_forecast_approvals_period_item (forecast_year, forecast_month, ma_quan_ly, ma_vtyt_cu),
 			KEY idx_forecast_approvals_period (forecast_year, forecast_month),
 			KEY idx_forecast_approvals_status (status)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -140,7 +142,7 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 			forecast_year INT NOT NULL,
 			forecast_month INT NOT NULL,
 			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
-			ma_vtyt_cu VARCHAR(255) NOT NULL,
+			ma_vtyt_cu VARCHAR(255) NOT NULL DEFAULT '',
 			ten_vtyt_bv VARCHAR(500) NOT NULL,
 			du_tru_goc INT NULL,
 			du_tru_sua INT NULL,
@@ -151,7 +153,7 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (id),
 			KEY idx_forecast_change_history_period (forecast_year, forecast_month),
-			KEY idx_forecast_change_history_item (ma_vtyt_cu),
+			KEY idx_forecast_change_history_item (ma_quan_ly, ma_vtyt_cu),
 			KEY idx_forecast_change_history_lookup (forecast_year, forecast_month, ma_quan_ly, ma_vtyt_cu, thoi_gian_thuc_hien, id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 	`
@@ -167,7 +169,7 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 			forecast_year INT NOT NULL,
 			forecast_month INT NOT NULL,
 			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
-			ma_vtyt_cu VARCHAR(255) NOT NULL,
+			ma_vtyt_cu VARCHAR(255) NOT NULL DEFAULT '',
 			ten_vtyt_bv VARCHAR(500) NOT NULL,
 			ma_hieu VARCHAR(1024) NOT NULL DEFAULT '',
 			hang_sx VARCHAR(512) NOT NULL DEFAULT '',
@@ -191,7 +193,7 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 			PRIMARY KEY (id),
-			UNIQUE KEY uk_forecast_monthly_snapshots_period_item (forecast_year, forecast_month, ma_vtyt_cu),
+			UNIQUE KEY uk_forecast_monthly_snapshots_period_item (forecast_year, forecast_month, ma_quan_ly, ma_vtyt_cu),
 			KEY idx_forecast_monthly_snapshots_period (forecast_year, forecast_month),
 			KEY idx_forecast_monthly_snapshots_status (status),
 			KEY idx_forecast_monthly_snapshots_source (source_approval_id)
@@ -200,6 +202,10 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 
 	if _, err := r.DB.Exec(snapshotStatement); err != nil {
 		return fmt.Errorf("error ensuring forecast monthly snapshot schema: %w", err)
+	}
+
+	if err := r.ensureForecastMaterialIdentifierSchema(); err != nil {
+		return err
 	}
 
 	if err := r.ensureMonthlySnapshotColumnSizes(); err != nil {
@@ -217,6 +223,117 @@ func (r *ForecastApprovalRepository) EnsureSchema() error {
 	}
 
 	return nil
+}
+
+func (r *ForecastApprovalRepository) ensureForecastMaterialIdentifierSchema() error {
+	for _, tableName := range []string{
+		"forecast_approvals",
+		"forecast_change_history",
+		"forecast_monthly_snapshots",
+	} {
+		if err := r.ensureLegacyMaterialCodeAllowsEmpty(tableName); err != nil {
+			return err
+		}
+	}
+
+	indexes := []struct {
+		tableName string
+		indexName string
+	}{
+		{tableName: "forecast_approvals", indexName: "uk_forecast_approvals_period_item"},
+		{tableName: "forecast_monthly_snapshots", indexName: "uk_forecast_monthly_snapshots_period_item"},
+	}
+	for _, index := range indexes {
+		if err := r.ensureForecastMaterialUniqueIndex(index.tableName, index.indexName); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *ForecastApprovalRepository) ensureLegacyMaterialCodeAllowsEmpty(tableName string) error {
+	var nullable string
+	var defaultValue sql.NullString
+	if err := r.DB.QueryRow(`
+		SELECT IS_NULLABLE, COLUMN_DEFAULT
+		FROM information_schema.columns
+		WHERE table_schema = DATABASE() AND table_name = ? AND column_name = 'ma_vtyt_cu'
+		LIMIT 1
+	`, tableName).Scan(&nullable, &defaultValue); err != nil {
+		return fmt.Errorf("error reading %s.ma_vtyt_cu definition: %w", tableName, err)
+	}
+
+	if strings.EqualFold(nullable, "NO") && defaultValue.Valid && defaultValue.String == "" {
+		return nil
+	}
+
+	statement := fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN ma_vtyt_cu VARCHAR(255) NOT NULL DEFAULT ''", tableName)
+	if _, err := r.DB.Exec(statement); err != nil {
+		return fmt.Errorf("error allowing empty legacy material ID in %s: %w", tableName, err)
+	}
+	return nil
+}
+
+func (r *ForecastApprovalRepository) ensureForecastMaterialUniqueIndex(tableName, indexName string) error {
+	rows, err := r.DB.Query(`
+		SELECT COLUMN_NAME
+		FROM information_schema.statistics
+		WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?
+		ORDER BY SEQ_IN_INDEX
+	`, tableName, indexName)
+	if err != nil {
+		return fmt.Errorf("error reading index %s.%s: %w", tableName, indexName, err)
+	}
+
+	columns := make([]string, 0, 4)
+	for rows.Next() {
+		var column string
+		if err := rows.Scan(&column); err != nil {
+			rows.Close()
+			return fmt.Errorf("error scanning index %s.%s: %w", tableName, indexName, err)
+		}
+		columns = append(columns, strings.ToLower(strings.TrimSpace(column)))
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("error closing index lookup %s.%s: %w", tableName, indexName, err)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating index %s.%s: %w", tableName, indexName, err)
+	}
+
+	expected := []string{"forecast_year", "forecast_month", "ma_quan_ly", "ma_vtyt_cu"}
+	if stringSlicesEqual(columns, expected) {
+		return nil
+	}
+
+	if len(columns) > 0 {
+		if _, err := r.DB.Exec(fmt.Sprintf("ALTER TABLE %s DROP INDEX %s", tableName, indexName)); err != nil {
+			return fmt.Errorf("error replacing legacy material index %s.%s: %w", tableName, indexName, err)
+		}
+	}
+
+	statement := fmt.Sprintf(
+		"ALTER TABLE %s ADD UNIQUE INDEX %s (forecast_year, forecast_month, ma_quan_ly, ma_vtyt_cu)",
+		tableName,
+		indexName,
+	)
+	if _, err := r.DB.Exec(statement); err != nil {
+		return fmt.Errorf("error creating material identifier index %s.%s: %w", tableName, indexName, err)
+	}
+	return nil
+}
+
+func stringSlicesEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *ForecastApprovalRepository) ensureMonthlySnapshotColumnSizes() error {
@@ -295,6 +412,7 @@ func (r *ForecastApprovalRepository) NeedsMonthlySnapshotBackfill() (bool, error
 		LEFT JOIN forecast_monthly_snapshots fms
 			ON fms.forecast_year = fa.forecast_year
 			AND fms.forecast_month = fa.forecast_month
+			AND TRIM(COALESCE(fms.ma_quan_ly, '')) = TRIM(COALESCE(fa.ma_quan_ly, ''))
 			AND fms.ma_vtyt_cu = fa.ma_vtyt_cu
 		WHERE fms.id IS NULL
 	`).Scan(&missingCount); err != nil {
@@ -370,7 +488,7 @@ func (r *ForecastApprovalRepository) BackfillMonthlySnapshots() error {
 				COALESCE(s.MA_HIEU, '') AS ma_hieu,
 				COALESCE(s.HANGSX, '') AS hang_sx,
 				COALESCE(s.NHA_CUNG_CAP, '') AS nha_thau,
-				COALESCE(s.TYPENAME, '') AS type_name,
+					COALESCE(NULLIF(TRIM(s.TYPENAME), ''), NULLIF(TRIM(fa.ma_quan_ly), ''), '') AS type_name,
 				COALESCE(s.QUY_CACH_DONG_GOI, '') AS quy_cach,
 				COALESCE(s.UNIT, '') AS don_vi_tinh,
 				COALESCE(s.PRICE, 0) AS don_gia,
@@ -395,18 +513,33 @@ func (r *ForecastApprovalRepository) BackfillMonthlySnapshots() error {
 				fa.nguoi_duyet_email,
 				fa.thoi_gian_duyet AS ngay_duyet
 			FROM forecast_approvals fa
-			LEFT JOIN forecast_change_history h ON h.id = (
+				LEFT JOIN forecast_change_history h ON h.id = (
 				SELECT MAX(h2.id)
 				FROM forecast_change_history h2
-				WHERE h2.forecast_year = fa.forecast_year
-					AND h2.forecast_month = fa.forecast_month
-					AND TRIM(COALESCE(h2.ma_vtyt_cu, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
-			)
-			LEFT JOIN supplies s ON s.IDX1 = (
-				SELECT MIN(s2.IDX1)
-				FROM supplies s2
-				WHERE TRIM(COALESCE(s2.ID, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
-			)
+					WHERE h2.forecast_year = fa.forecast_year
+						AND h2.forecast_month = fa.forecast_month
+						AND TRIM(COALESCE(h2.ma_quan_ly, '')) = TRIM(COALESCE(fa.ma_quan_ly, ''))
+						AND TRIM(COALESCE(h2.ma_vtyt_cu, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
+				)
+				LEFT JOIN supplies s ON s.IDX1 = (
+					SELECT s2.IDX1
+					FROM supplies s2
+					WHERE (
+						TRIM(COALESCE(fa.ma_quan_ly, '')) <> ''
+						AND TRIM(COALESCE(s2.TYPENAME, '')) = TRIM(COALESCE(fa.ma_quan_ly, ''))
+						AND (
+							TRIM(COALESCE(fa.ma_vtyt_cu, '')) = ''
+							OR TRIM(COALESCE(s2.ID, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
+						)
+					) OR (
+						TRIM(COALESCE(fa.ma_vtyt_cu, '')) <> ''
+						AND TRIM(COALESCE(s2.ID, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
+					)
+					ORDER BY
+						CASE WHEN TRIM(COALESCE(s2.TYPENAME, '')) = TRIM(COALESCE(fa.ma_quan_ly, '')) THEN 0 ELSE 1 END,
+						s2.IDX1
+					LIMIT 1
+				)
 		) snapshot
 	`)
 	if err != nil {
@@ -473,6 +606,8 @@ func (r *ForecastApprovalRepository) ListByMonthYear(month, year int) ([]Forecas
 			record.DuTruSua = &value
 		}
 
+		record.MaQuanLy, record.MaVtytCu = NormalizeMaterialIdentifiers(record.MaQuanLy, record.MaVtytCu)
+		record.MaterialCode = PreferredMaterialCode(record.MaQuanLy, record.MaVtytCu)
 		records = append(records, record)
 	}
 
@@ -502,12 +637,12 @@ func (r *ForecastApprovalRepository) SaveApprovals(inputs []SaveForecastApproval
 		if left.ForecastMonth != right.ForecastMonth {
 			return left.ForecastMonth < right.ForecastMonth
 		}
-		leftCode := strings.TrimSpace(left.MaVtytCu)
-		rightCode := strings.TrimSpace(right.MaVtytCu)
+		leftCode := strings.TrimSpace(left.MaQuanLy)
+		rightCode := strings.TrimSpace(right.MaQuanLy)
 		if leftCode != rightCode {
 			return leftCode < rightCode
 		}
-		return strings.TrimSpace(left.MaQuanLy) < strings.TrimSpace(right.MaQuanLy)
+		return strings.TrimSpace(left.MaVtytCu) < strings.TrimSpace(right.MaVtytCu)
 	})
 
 	var lastErr error
@@ -704,7 +839,7 @@ func (r *ForecastApprovalRepository) upsertMonthlySnapshot(tx *sql.Tx, input Sav
 				COALESCE(s.MA_HIEU, '') AS ma_hieu,
 				COALESCE(s.HANGSX, '') AS hang_sx,
 				COALESCE(s.NHA_CUNG_CAP, '') AS nha_thau,
-				COALESCE(s.TYPENAME, '') AS type_name,
+					COALESCE(NULLIF(TRIM(s.TYPENAME), ''), NULLIF(TRIM(fa.ma_quan_ly), ''), '') AS type_name,
 				COALESCE(s.QUY_CACH_DONG_GOI, '') AS quy_cach,
 				COALESCE(s.UNIT, '') AS don_vi_tinh,
 				COALESCE(s.PRICE, 0) AS don_gia,
@@ -729,21 +864,37 @@ func (r *ForecastApprovalRepository) upsertMonthlySnapshot(tx *sql.Tx, input Sav
 				fa.nguoi_duyet_email,
 				fa.thoi_gian_duyet AS ngay_duyet
 			FROM forecast_approvals fa
-			LEFT JOIN forecast_change_history h ON h.id = (
+				LEFT JOIN forecast_change_history h ON h.id = (
 				SELECT MAX(h2.id)
 				FROM forecast_change_history h2
-				WHERE h2.forecast_year = fa.forecast_year
-					AND h2.forecast_month = fa.forecast_month
-					AND TRIM(COALESCE(h2.ma_vtyt_cu, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
-			)
-			LEFT JOIN supplies s ON s.IDX1 = (
-				SELECT MIN(s2.IDX1)
-				FROM supplies s2
-				WHERE TRIM(COALESCE(s2.ID, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
-			)
-			WHERE fa.forecast_month = ?
-				AND fa.forecast_year = ?
-				AND TRIM(COALESCE(fa.ma_vtyt_cu, '')) = TRIM(?)
+					WHERE h2.forecast_year = fa.forecast_year
+						AND h2.forecast_month = fa.forecast_month
+						AND TRIM(COALESCE(h2.ma_quan_ly, '')) = TRIM(COALESCE(fa.ma_quan_ly, ''))
+						AND TRIM(COALESCE(h2.ma_vtyt_cu, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
+				)
+				LEFT JOIN supplies s ON s.IDX1 = (
+					SELECT s2.IDX1
+					FROM supplies s2
+					WHERE (
+						TRIM(COALESCE(fa.ma_quan_ly, '')) <> ''
+						AND TRIM(COALESCE(s2.TYPENAME, '')) = TRIM(COALESCE(fa.ma_quan_ly, ''))
+						AND (
+							TRIM(COALESCE(fa.ma_vtyt_cu, '')) = ''
+							OR TRIM(COALESCE(s2.ID, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
+						)
+					) OR (
+						TRIM(COALESCE(fa.ma_vtyt_cu, '')) <> ''
+						AND TRIM(COALESCE(s2.ID, '')) = TRIM(COALESCE(fa.ma_vtyt_cu, ''))
+					)
+					ORDER BY
+						CASE WHEN TRIM(COALESCE(s2.TYPENAME, '')) = TRIM(COALESCE(fa.ma_quan_ly, '')) THEN 0 ELSE 1 END,
+						s2.IDX1
+					LIMIT 1
+				)
+				WHERE fa.forecast_month = ?
+					AND fa.forecast_year = ?
+					AND TRIM(COALESCE(fa.ma_quan_ly, '')) = TRIM(?)
+					AND TRIM(COALESCE(fa.ma_vtyt_cu, '')) = TRIM(?)
 		) snapshot
 		ON DUPLICATE KEY UPDATE
 			source_approval_id = VALUES(source_approval_id),
@@ -768,7 +919,7 @@ func (r *ForecastApprovalRepository) upsertMonthlySnapshot(tx *sql.Tx, input Sav
 			nguoi_duyet = VALUES(nguoi_duyet),
 			nguoi_duyet_email = VALUES(nguoi_duyet_email),
 			ngay_duyet = VALUES(ngay_duyet)
-	`, input.ForecastMonth, input.ForecastYear, input.MaVtytCu)
+		`, input.ForecastMonth, input.ForecastYear, input.MaQuanLy, input.MaVtytCu)
 	if err != nil {
 		return fmt.Errorf("error upserting forecast monthly snapshot: %w", err)
 	}
@@ -787,8 +938,8 @@ func (r *ForecastApprovalRepository) ListChangeHistory(limit, month, year int, l
 			id,
 			forecast_month,
 			forecast_year,
-			ma_quan_ly,
-			ma_vtyt_cu,
+				ma_quan_ly,
+				ma_vtyt_cu,
 			ten_vtyt_bv,
 			du_tru_goc,
 			du_tru_sua,
@@ -867,6 +1018,8 @@ func (r *ForecastApprovalRepository) ListChangeHistory(limit, month, year int, l
 			seenLatestKeys[recordKey] = struct{}{}
 		}
 
+		row.MaQuanLy, row.MaVtytCu = NormalizeMaterialIdentifiers(row.MaQuanLy, row.MaVtytCu)
+		row.MaterialCode = PreferredMaterialCode(row.MaQuanLy, row.MaVtytCu)
 		records = append(records, row)
 		if latestOnly && limit > 0 && len(records) >= limit {
 			break
@@ -910,8 +1063,8 @@ func (r *ForecastApprovalRepository) listApprovalHistory(limit, month, year int)
 			id,
 			forecast_month,
 			forecast_year,
-			ma_quan_ly,
-			ma_vtyt_cu,
+				ma_quan_ly,
+				ma_vtyt_cu,
 			ten_vtyt_bv,
 			status,
 			COALESCE(ly_do, ''),
@@ -986,6 +1139,8 @@ func (r *ForecastApprovalRepository) listApprovalHistory(limit, month, year int)
 			row.DuTruSua = &value
 		}
 
+		row.MaQuanLy, row.MaVtytCu = NormalizeMaterialIdentifiers(row.MaQuanLy, row.MaVtytCu)
+		row.MaterialCode = PreferredMaterialCode(row.MaQuanLy, row.MaVtytCu)
 		records = append(records, row)
 	}
 
@@ -1001,8 +1156,8 @@ func (r *ForecastApprovalRepository) ListMonthlyChangeHistory() ([]ForecastMonth
 		SELECT
 			id,
 			forecast_month,
-			forecast_year,
-			ma_vtyt_cu,
+				forecast_year,
+				COALESCE(NULLIF(TRIM(ma_quan_ly), ''), TRIM(ma_vtyt_cu)) AS material_code,
 			ten_vtyt_bv,
 			status,
 			du_tru,
@@ -1180,7 +1335,7 @@ func shouldPersistForecastChange(input SaveForecastApprovalInput) bool {
 }
 
 func forecastChangeHistoryKey(month, year int, maQuanLy, maVtytCu string) string {
-	return fmt.Sprintf("%d-%02d-%s-%s", year, month, strings.TrimSpace(maQuanLy), strings.TrimSpace(maVtytCu))
+	return fmt.Sprintf("%d-%02d-%s", year, month, MaterialIdentifierKey(maQuanLy, maVtytCu))
 }
 
 func parseForecastHistoryTime(value string) time.Time {

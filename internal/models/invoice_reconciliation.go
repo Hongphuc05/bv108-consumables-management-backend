@@ -25,6 +25,7 @@ type InvoiceReconciliationRecord struct {
 	NhaThau                 string     `json:"nhaThau"`
 	MaQuanLy                string     `json:"maQuanLy"`
 	MaVtytCu                string     `json:"maVtytCu"`
+	MaterialCode            string     `json:"materialCode"`
 	TenVtytBv               string     `json:"tenVtytBv"`
 	OrderedQty              int        `json:"orderedQty"`
 	OrderTime               *time.Time `json:"orderTime,omitempty"`
@@ -111,7 +112,7 @@ func (r *InvoiceReconciliationRepository) EnsureSchema() error {
 			company_contact_id VARCHAR(50) NULL,
 			nha_thau VARCHAR(255) NOT NULL,
 			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
-			ma_vtyt_cu VARCHAR(255) NOT NULL,
+			ma_vtyt_cu VARCHAR(255) NOT NULL DEFAULT '',
 			ten_vtyt_bv VARCHAR(500) NOT NULL,
 			ordered_qty INT NOT NULL,
 			order_time DATETIME NULL,
@@ -264,6 +265,7 @@ func (r *InvoiceReconciliationRepository) UpsertBulk(inputs []UpsertInvoiceRecon
 		if status == "" {
 			status = InvoiceReconciliationStatusPending
 		}
+		maQuanLy, maVtytCu := NormalizeMaterialIdentifiers(input.MaQuanLy, input.MaVtytCu)
 
 		if _, err := tx.Exec(
 			statement,
@@ -271,8 +273,8 @@ func (r *InvoiceReconciliationRepository) UpsertBulk(inputs []UpsertInvoiceRecon
 			strings.TrimSpace(input.OrderBatchKey),
 			nullableStringValue(input.CompanyContactID),
 			strings.TrimSpace(input.NhaThau),
-			strings.TrimSpace(input.MaQuanLy),
-			strings.TrimSpace(input.MaVtytCu),
+			maQuanLy,
+			maVtytCu,
 			strings.TrimSpace(input.TenVtytBv),
 			input.OrderedQty,
 			nullableTimeValue(input.OrderTime),
@@ -433,6 +435,8 @@ func (r *InvoiceReconciliationRepository) ListByMonthYear(month, year int) ([]In
 			item.MatchedByUserID = &value
 		}
 
+		item.MaQuanLy, item.MaVtytCu = NormalizeMaterialIdentifiers(item.MaQuanLy, item.MaVtytCu)
+		item.MaterialCode = PreferredMaterialCode(item.MaQuanLy, item.MaVtytCu)
 		records = append(records, item)
 	}
 
@@ -596,6 +600,8 @@ func (r *InvoiceReconciliationRepository) ListAllReconciliations() ([]InvoiceRec
 			item.MatchedByUserID = &value
 		}
 
+		item.MaQuanLy, item.MaVtytCu = NormalizeMaterialIdentifiers(item.MaQuanLy, item.MaVtytCu)
+		item.MaterialCode = PreferredMaterialCode(item.MaQuanLy, item.MaVtytCu)
 		records = append(records, item)
 	}
 

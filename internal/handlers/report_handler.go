@@ -67,12 +67,24 @@ func (h *ReportHandler) GenerateGeminiCompare(c *gin.Context) {
 
 	resp, status, err := h.geminiProxy.GenerateContent(payload)
 	if err != nil {
-		c.JSON(status, ErrorResponse{
-			Error:   "GEMINI_ERROR",
-			Message: err.Error(),
-		})
+		clientStatus, errorResponse := normalizeGeminiProxyError(status, err)
+		c.JSON(clientStatus, errorResponse)
 		return
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+func normalizeGeminiProxyError(status int, err error) (int, ErrorResponse) {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return http.StatusBadGateway, ErrorResponse{
+			Error:   "GEMINI_AUTH_ERROR",
+			Message: "Gemini từ chối thông tin xác thực. Hãy kiểm tra GEMINI_API_KEY.",
+		}
+	}
+
+	return status, ErrorResponse{
+		Error:   "GEMINI_ERROR",
+		Message: err.Error(),
+	}
 }

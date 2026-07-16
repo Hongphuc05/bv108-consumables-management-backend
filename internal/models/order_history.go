@@ -19,28 +19,29 @@ type OrderActor struct {
 }
 
 type PendingOrder struct {
-	ID                 int64  `json:"id"`
-	CompanyContactID *string `json:"companyContactId,omitempty"`
-	NhaThau            string `json:"nhaThau"`
-	MaQuanLy           string `json:"maQuanLy"`
-	MaVtytCu           string `json:"maVtytCu"`
-	TenVtytBv          string `json:"tenVtytBv"`
-	MaHieu             string `json:"maHieu"`
-	HangSx             string `json:"hangSx"`
-	DonViTinh          string `json:"donViTinh"`
-	QuyCach            string `json:"quyCach"`
-	DotGoiHang         int    `json:"dotGoiHang"`
-	Email              string `json:"email,omitempty"`
-	Source             string `json:"source"`
-	GroupKey           string `json:"groupKey,omitempty"`
-	NguoiPheDuyet      string `json:"nguoiPheDuyet,omitempty"`
-	NguoiPheDuyetEmail string `json:"nguoiPheDuyetEmail,omitempty"`
-	ThoiGianPheDuyet   string `json:"thoiGianPheDuyet,omitempty"`
-	NguoiTaoDon        string `json:"nguoiTaoDon,omitempty"`
-	NguoiTaoDonEmail   string `json:"nguoiTaoDonEmail,omitempty"`
-	NgayTao            string `json:"ngayTao,omitempty"`
-	CreatedAtTS        string `json:"createdAtTs,omitempty"`
-	UpdatedAtTS        string `json:"updatedAtTs,omitempty"`
+	ID                 int64   `json:"id"`
+	CompanyContactID   *string `json:"companyContactId,omitempty"`
+	NhaThau            string  `json:"nhaThau"`
+	MaQuanLy           string  `json:"maQuanLy"`
+	MaVtytCu           string  `json:"maVtytCu"`
+	MaterialCode       string  `json:"materialCode"`
+	TenVtytBv          string  `json:"tenVtytBv"`
+	MaHieu             string  `json:"maHieu"`
+	HangSx             string  `json:"hangSx"`
+	DonViTinh          string  `json:"donViTinh"`
+	QuyCach            string  `json:"quyCach"`
+	DotGoiHang         int     `json:"dotGoiHang"`
+	Email              string  `json:"email,omitempty"`
+	Source             string  `json:"source"`
+	GroupKey           string  `json:"groupKey,omitempty"`
+	NguoiPheDuyet      string  `json:"nguoiPheDuyet,omitempty"`
+	NguoiPheDuyetEmail string  `json:"nguoiPheDuyetEmail,omitempty"`
+	ThoiGianPheDuyet   string  `json:"thoiGianPheDuyet,omitempty"`
+	NguoiTaoDon        string  `json:"nguoiTaoDon,omitempty"`
+	NguoiTaoDonEmail   string  `json:"nguoiTaoDonEmail,omitempty"`
+	NgayTao            string  `json:"ngayTao,omitempty"`
+	CreatedAtTS        string  `json:"createdAtTs,omitempty"`
+	UpdatedAtTS        string  `json:"updatedAtTs,omitempty"`
 }
 
 type OrderHistoryRecord struct {
@@ -88,7 +89,7 @@ func (r *OrderRepository) EnsureSchema() error {
 			company_contact_id VARCHAR(50) NULL,
 			nha_thau VARCHAR(255) NOT NULL,
 			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
-			ma_vtyt_cu VARCHAR(255) NOT NULL,
+			ma_vtyt_cu VARCHAR(255) NOT NULL DEFAULT '',
 			ten_vtyt_bv VARCHAR(500) NOT NULL,
 			ma_hieu VARCHAR(255) NOT NULL DEFAULT '',
 			hang_sx VARCHAR(255) NOT NULL DEFAULT '',
@@ -112,7 +113,7 @@ func (r *OrderRepository) EnsureSchema() error {
 			PRIMARY KEY (id),
 			KEY idx_pending_orders_company_contact (company_contact_id),
 			KEY idx_pending_orders_created_at (updated_at, id),
-			KEY idx_pending_orders_source_code (source, ma_vtyt_cu),
+			KEY idx_pending_orders_source_code (source, ma_quan_ly, ma_vtyt_cu),
 			KEY idx_pending_orders_group_key (group_key)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 		`,
@@ -123,7 +124,7 @@ func (r *OrderRepository) EnsureSchema() error {
 			company_contact_id VARCHAR(50) NULL,
 			nha_thau VARCHAR(255) NOT NULL,
 			ma_quan_ly VARCHAR(255) NOT NULL DEFAULT '',
-			ma_vtyt_cu VARCHAR(255) NOT NULL,
+			ma_vtyt_cu VARCHAR(255) NOT NULL DEFAULT '',
 			ten_vtyt_bv VARCHAR(500) NOT NULL,
 			ma_hieu VARCHAR(255) NOT NULL DEFAULT '',
 			hang_sx VARCHAR(255) NOT NULL DEFAULT '',
@@ -282,6 +283,7 @@ func (r *OrderRepository) ListPendingOrders() ([]PendingOrder, error) {
 			value := companyContactID.String
 			order.CompanyContactID = &value
 		}
+		normalizePendingOrderIdentifiers(&order)
 		orders = append(orders, order)
 	}
 
@@ -370,6 +372,7 @@ func (r *OrderRepository) GetPendingOrdersByIDs(orderIDs []int64) ([]PendingOrde
 			value := companyContactID.String
 			order.CompanyContactID = &value
 		}
+		normalizePendingOrderIdentifiers(&order)
 		orders = append(orders, order)
 	}
 
@@ -453,6 +456,7 @@ func (r *OrderRepository) ListOrderHistory() ([]OrderHistoryRecord, error) {
 			item.CompanyContactID = &value
 		}
 		item.EmailSent = emailSent == 1
+		normalizePendingOrderIdentifiers(&item.PendingOrder)
 		history = append(history, item)
 	}
 
@@ -549,6 +553,7 @@ func (r *OrderRepository) GetOrderHistoryByIDs(orderIDs []int64) ([]OrderHistory
 			item.CompanyContactID = &value
 		}
 		item.EmailSent = emailSent == 1
+		normalizePendingOrderIdentifiers(&item.PendingOrder)
 		history = append(history, item)
 	}
 
@@ -574,6 +579,7 @@ func (r *OrderRepository) RepeatOrderHistory(history []OrderHistoryRecord, place
 
 	placedAt := currentTimestamp()
 	for _, order := range history {
+		maQuanLy, maVtytCu := NormalizeMaterialIdentifiers(order.MaQuanLy, order.MaVtytCu)
 		var companyContactID interface{}
 		if order.CompanyContactID != nil {
 			companyContactID = *order.CompanyContactID
@@ -614,8 +620,8 @@ func (r *OrderRepository) RepeatOrderHistory(history []OrderHistoryRecord, place
 			nil,
 			companyContactID,
 			order.NhaThau,
-			order.MaQuanLy,
-			order.MaVtytCu,
+			maQuanLy,
+			maVtytCu,
 			order.TenVtytBv,
 			order.MaHieu,
 			order.HangSx,
@@ -837,6 +843,7 @@ func (r *OrderRepository) PlaceOrders(orderIDs []int64, placedBy OrderActor) (in
 		); err != nil {
 			return 0, fmt.Errorf("error scanning pending order before placing: %w", err)
 		}
+		order.MaQuanLy, order.MaVtytCu = NormalizeMaterialIdentifiers(order.MaQuanLy, order.MaVtytCu)
 		selectedOrders = append(selectedOrders, order)
 	}
 
@@ -927,6 +934,11 @@ func (r *OrderRepository) PlaceOrders(orderIDs []int64, placedBy OrderActor) (in
 }
 
 func (r *OrderRepository) insertPendingOrderTx(tx *sql.Tx, input CreatePendingOrderInput, now string) error {
+	input.MaQuanLy, input.MaVtytCu = NormalizeMaterialIdentifiers(input.MaQuanLy, input.MaVtytCu)
+	if input.MaQuanLy == "" {
+		return fmt.Errorf("TYPENAME or legacy material ID is required")
+	}
+
 	approverID := nullableInt64(input.Approver)
 	approverName := nullableActorField(input.Approver, func(actor *OrderActor) string { return actor.Username })
 	approverEmail := nullableActorField(input.Approver, func(actor *OrderActor) string { return actor.Email })
@@ -1074,6 +1086,14 @@ func nullableInt64(actor *OrderActor) interface{} {
 		return nil
 	}
 	return actor.ID
+}
+
+func normalizePendingOrderIdentifiers(order *PendingOrder) {
+	if order == nil {
+		return
+	}
+	order.MaQuanLy, order.MaVtytCu = NormalizeMaterialIdentifiers(order.MaQuanLy, order.MaVtytCu)
+	order.MaterialCode = PreferredMaterialCode(order.MaQuanLy, order.MaVtytCu)
 }
 
 func nullableActorField(actor *OrderActor, field func(*OrderActor) string) string {

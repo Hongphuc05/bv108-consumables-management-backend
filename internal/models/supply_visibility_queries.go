@@ -106,9 +106,9 @@ func (r *SupplyRepository) SearchByNameVisible(keyword string, page, pageSize in
 	countQuery := `
 		SELECT COUNT(*)
 		FROM supplies
-		WHERE (NAME LIKE ? OR ID LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?)
-	` + filterClause
-	countArgs := []interface{}{searchPattern, searchPattern, searchPattern, searchPattern}
+			WHERE (TYPENAME LIKE ? OR ID LIKE ? OR NAME LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?)
+		` + filterClause
+	countArgs := []interface{}{searchPattern, searchPattern, searchPattern, searchPattern, searchPattern}
 	countArgs = append(countArgs, filterArgs...)
 	if err := r.DB.QueryRow(countQuery, countArgs...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("error counting supplies: %w", err)
@@ -118,13 +118,13 @@ func (r *SupplyRepository) SearchByNameVisible(keyword string, page, pageSize in
 		SELECT
 			` + supplySelectColumns + `
 		FROM supplies
-		WHERE (NAME LIKE ? OR ID LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?)
+			WHERE (TYPENAME LIKE ? OR ID LIKE ? OR NAME LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?)
 	` + filterClause + `
 		ORDER BY IDX1
 		LIMIT ? OFFSET ?
 	`
 
-	args := []interface{}{searchPattern, searchPattern, searchPattern, searchPattern}
+	args := []interface{}{searchPattern, searchPattern, searchPattern, searchPattern, searchPattern}
 	args = append(args, filterArgs...)
 	args = append(args, pageSize, offset)
 
@@ -274,8 +274,8 @@ func (r *SupplyRepository) GetForecastCatalogVisible(keyword string, visibleIDX1
 
 	args := make([]interface{}, 0)
 	if keyword != "" {
-		query += " AND (NAME LIKE ? OR ID LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?)"
-		args = append(args, searchPattern, searchPattern, searchPattern, searchPattern)
+		query += " AND (TYPENAME LIKE ? OR ID LIKE ? OR NAME LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?)"
+		args = append(args, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern)
 	}
 	query += filterClause
 	query += " ORDER BY IDX1"

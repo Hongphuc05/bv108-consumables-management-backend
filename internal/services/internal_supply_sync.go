@@ -43,6 +43,7 @@ type internalSupplyAPIRow struct {
 	Idx2            string  `json:"IDX2"`
 	MaHieu          string  `json:"MA_HIEU"`
 	TypeName        string  `json:"TYPENAME"`
+	TypeNameLower   string  `json:"typename"`
 	TenVatTuBV      string  `json:"TEN_VTYT_BV"`
 	Name            string  `json:"NAME"`
 	DonViTinh       string  `json:"DON_VI_TINH"`
@@ -154,65 +155,6 @@ func (s *InternalSupplySyncService) RunOnce(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("error syncing supplies: %w", err)
 	}
 
-	// Inject fake test rows for verification
-	rows = append(rows, internalSupplyAPIRow{
-		Idx1:         99901,
-		ProductID:    99901,
-		ID:           "TEST001",
-		MaVtyt:       "TEST001",
-		Name:         "Vật tư thử nghiệm 1 (TEST001)",
-		Unit:         "Cái",
-		MaHieu:       "REF_TEST001",
-		ThongTinThau: "TEST_QD_001",
-		TypeName:     "N99.99.999-999-991",
-		HangSX:       "Hãng SX Test 1",
-		NuocSX:       "Việt Nam",
-		NhaCungCap:   "Nhà cung cấp Test 1",
-		Price:        50000,
-		TonDauKy:     100,
-		NhapTrongKy:  100,
-		XuatTrongKy:  50,
-		TongNhap:     100,
-	})
-	rows = append(rows, internalSupplyAPIRow{
-		Idx1:         99902,
-		ProductID:    99902,
-		ID:           "TEST002",
-		MaVtyt:       "TEST002",
-		Name:         "Vật tư thử nghiệm 2 (TEST002)",
-		Unit:         "Hộp",
-		MaHieu:       "REF_TEST002",
-		ThongTinThau: "TEST_QD_002",
-		TypeName:     "N99.99.999-999-992",
-		HangSX:       "Hãng SX Test 2",
-		NuocSX:       "Nhật Bản",
-		NhaCungCap:   "Nhà cung cấp Test 2",
-		Price:        120000,
-		TonDauKy:     200,
-		NhapTrongKy:  150,
-		XuatTrongKy:  80,
-		TongNhap:     150,
-	})
-	rows = append(rows, internalSupplyAPIRow{
-		Idx1:         99903,
-		ProductID:    99903,
-		ID:           "TEST003",
-		MaVtyt:       "TEST003",
-		Name:         "Vật tư thử nghiệm 3 (TEST003)",
-		Unit:         "Bộ",
-		MaHieu:       "REF_TEST003",
-		ThongTinThau: "TEST_QD_003",
-		TypeName:     "N99.99.999-999-993",
-		HangSX:       "Hãng SX Test 3",
-		NuocSX:       "Hoa Kỳ",
-		NhaCungCap:   "Nhà cung cấp Test 3",
-		Price:        450000,
-		TonDauKy:     50,
-		NhapTrongKy:  30,
-		XuatTrongKy:  20,
-		TongNhap:     30,
-	})
-
 	if len(rows) == 0 {
 		return 0, fmt.Errorf("internal supply API returned no product rows (ensure INTERNAL_SUPPLY_API_BODY is set correctly)")
 	}
@@ -230,16 +172,14 @@ func (s *InternalSupplySyncService) RunOnce(ctx context.Context) (int, error) {
 
 		// Fill in missing fields from mapping table
 		if len(mappings) > 0 {
-			var key string
-			if tableName == "mapping" {
-				// mapping key format: typename + "_" + quyetdinh
-				key = cleanMappingKey(input.TypeName + "_" + input.ThongTinThau)
-			} else {
-				// mapping2 key format: ID + "_" + quyetdinh
-				key = cleanMappingKey(input.ID + "_" + input.ThongTinThau)
-			}
+			// Prefer the future TYPENAME mapping and retain the legacy ID key
+			// while mapping/mapping2 are being migrated.
+			mappingKeys := uniqueNonEmptyMappingKeys(
+				input.TypeName+"_"+input.ThongTinThau,
+				input.ID+"_"+input.ThongTinThau,
+			)
 
-			if m, found := mappings[key]; found {
+			if m, found := firstSupplyMapping(mappings, mappingKeys); found {
 				if input.GroupName == "" {
 					input.GroupName = m.GroupName
 				}
@@ -276,17 +216,26 @@ func (s *InternalSupplySyncService) RunOnce(ctx context.Context) (int, error) {
 	partners, err := s.fetchPartners(ctx)
 	if err != nil {
 		log.Printf("[internal-supply-sync] warning: failed to fetch partners: %v", err)
-	} else if len(partners) > 0 {
+	} else if len(partners) > 0 && s.contactRepo != nil {
 		contacts := make([]models.CompanyContact, 0, len(partners))
 		defaultEmail := models.ResolveDefaultCompanyContactEmail()
 		for _, p := range partners {
+			identity := firstNonEmpty(p.TaxCode, p.ID, p.Code)
+			name := strings.TrimSpace(p.Name)
+			if identity == "" || name == "" {
+				continue
+			}
 			contacts = append(contacts, models.CompanyContact{
-				MaSoThue:  strings.TrimSpace(p.Code), // Use partner Code (e.g. NCC_DATVIET) as primary key ma_so_thue
-				TenCongTy: strings.TrimSpace(p.Name),
-				Gmail:     defaultEmail,
+				MaSoThue:     identity,
+				TenCongTy:    name,
+				DiaChiCongTy: strings.TrimSpace(p.Address),
+				SoTKNganHang: strings.TrimSpace(p.BankAccount),
+				Gmail:        firstNonEmpty(p.ContactEmail, p.Email, defaultEmail),
 			})
 		}
-		if err := s.contactRepo.ReplaceAll(contacts); err != nil {
+		if len(contacts) == 0 {
+			log.Println("[internal-supply-sync] warning: partner API returned no usable company contacts")
+		} else if err := s.contactRepo.ReplaceAll(contacts); err != nil {
 			log.Printf("[internal-supply-sync] warning: failed to update company contacts: %v", err)
 		} else {
 			log.Printf("[internal-supply-sync] synced %d company contacts successfully", len(contacts))
@@ -340,7 +289,7 @@ func (s *InternalSupplySyncService) durationUntilNextRun(now time.Time) time.Dur
 }
 
 func (s *InternalSupplySyncService) fetchRows(ctx context.Context, path string) ([]internalSupplyAPIRow, error) {
-	apiURL := s.config.InternalSupplyAPIURL + path
+	apiURL := strings.TrimRight(strings.TrimSpace(s.config.InternalSupplyAPIURL), "/") + "/" + strings.TrimLeft(path, "/")
 	bodyString := strings.TrimSpace(s.config.InternalSupplyAPIBody)
 	if bodyString == "" {
 		bodyString = "{}"
@@ -353,7 +302,7 @@ func (s *InternalSupplySyncService) fetchRows(ctx context.Context, path string) 
 	req.Header.Set("Content-Type", "application/json")
 
 	if token := strings.TrimSpace(s.config.InternalSupplyAPIToken); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", bearerAuthorization(token))
 	}
 	if cookie := strings.TrimSpace(s.config.InternalSupplyAPICookie); cookie != "" {
 		req.Header.Set("Cookie", cookie)
@@ -397,9 +346,14 @@ func (s *InternalSupplySyncService) fetchRows(ctx context.Context, path string) 
 }
 
 type hospitalPartnerRow struct {
-	ID   string `json:"id"`
-	Code string `json:"code"`
-	Name string `json:"name"`
+	ID           string `json:"id"`
+	Code         string `json:"code"`
+	Name         string `json:"name"`
+	Address      string `json:"address"`
+	Email        string `json:"email"`
+	TaxCode      string `json:"tax_code"`
+	BankAccount  string `json:"bank_account"`
+	ContactEmail string `json:"contact_email"`
 }
 
 type hospitalPartnerAPIResponse struct {
@@ -407,7 +361,7 @@ type hospitalPartnerAPIResponse struct {
 }
 
 func (s *InternalSupplySyncService) fetchPartners(ctx context.Context) ([]hospitalPartnerRow, error) {
-	apiURL := s.config.InternalSupplyAPIURL + "/partner_select_for_po?method=select"
+	apiURL := strings.TrimRight(strings.TrimSpace(s.config.InternalSupplyAPIURL), "/") + "/partner_select_for_po?method=select"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, strings.NewReader("{}"))
 	if err != nil {
 		return nil, fmt.Errorf("error creating partner API request: %w", err)
@@ -416,7 +370,7 @@ func (s *InternalSupplySyncService) fetchPartners(ctx context.Context) ([]hospit
 	req.Header.Set("Content-Type", "application/json")
 
 	if token := strings.TrimSpace(s.config.InternalSupplyAPIToken); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", bearerAuthorization(token))
 	}
 	if cookie := strings.TrimSpace(s.config.InternalSupplyAPICookie); cookie != "" {
 		req.Header.Set("Cookie", cookie)
@@ -491,7 +445,7 @@ func mapInternalSupplyRow(row internalSupplyAPIRow, index int) models.SupplyUpse
 		ID:              strings.TrimSpace(id),
 		IDX2:            strings.TrimSpace(row.Idx2),
 		MaHieu:          strings.TrimSpace(firstNonEmpty(row.MaHieu, row.MaHieuLower)),
-		TypeName:        strings.TrimSpace(row.TypeName),
+		TypeName:        strings.TrimSpace(firstNonEmpty(row.TypeName, row.TypeNameLower)),
 		Name:            strings.TrimSpace(name),
 		Unit:            strings.TrimSpace(unit),
 		QuyCachDongGoi:  strings.TrimSpace(quyCachDongGoi),
@@ -535,3 +489,29 @@ func cleanMappingKey(key string) string {
 	return strings.TrimSpace(key)
 }
 
+func uniqueNonEmptyMappingKeys(values ...string) []string {
+	keys := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		key := cleanMappingKey(value)
+		identifier := strings.TrimSpace(strings.SplitN(key, "_", 2)[0])
+		if identifier == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func firstSupplyMapping(mappings map[string]models.SupplyMapping, keys []string) (models.SupplyMapping, bool) {
+	for _, key := range keys {
+		if mapping, found := mappings[key]; found {
+			return mapping, true
+		}
+	}
+	return models.SupplyMapping{}, false
+}

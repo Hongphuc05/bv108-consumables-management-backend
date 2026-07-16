@@ -30,6 +30,7 @@ type Supply struct {
 	XuatTrongKy     sql.NullInt32   `json:"xuatTrongKy"`
 	TongNhap        sql.NullInt32   `json:"tongNhap"`
 	TonKhoMin       sql.NullInt32   `json:"tonKhoMin"`
+	MaterialCode    string          `json:"materialCode"`
 	// Calculated field
 	TonCuoiKy int `json:"tonCuoiKy"`
 }
@@ -214,6 +215,7 @@ func scanSupply(scanner interface {
 	if err != nil {
 		return Supply{}, err
 	}
+	s.MaterialCode = PreferredMaterialCode(s.TypeName.String, s.ID.String)
 	s.TonCuoiKy = calculateTonCuoiKy(s.TonDauKy, s.NhapTrongKy, s.XuatTrongKy)
 	return s, nil
 }
@@ -291,8 +293,8 @@ func (r *SupplyRepository) SearchByName(keyword string, page, pageSize int) ([]S
 
 	// Get total count
 	var total int
-	countQuery := "SELECT COUNT(*) FROM supplies WHERE NAME LIKE ? OR ID LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?"
-	err := r.DB.QueryRow(countQuery, searchPattern, searchPattern, searchPattern, searchPattern).Scan(&total)
+	countQuery := "SELECT COUNT(*) FROM supplies WHERE TYPENAME LIKE ? OR ID LIKE ? OR NAME LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?"
+	err := r.DB.QueryRow(countQuery, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error counting supplies: %w", err)
 	}
@@ -302,12 +304,12 @@ func (r *SupplyRepository) SearchByName(keyword string, page, pageSize int) ([]S
 		SELECT 
 			` + supplySelectColumns + `
 		FROM supplies
-		WHERE NAME LIKE ? OR ID LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?
+		WHERE TYPENAME LIKE ? OR ID LIKE ? OR NAME LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?
 		ORDER BY IDX1
 		LIMIT ? OFFSET ?
 	`
 
-	rows, err := r.DB.Query(query, searchPattern, searchPattern, searchPattern, searchPattern, pageSize, offset)
+	rows, err := r.DB.Query(query, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, pageSize, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error searching supplies: %w", err)
 	}
@@ -766,8 +768,8 @@ func (r *SupplyRepository) GetForecastCatalog(keyword string) ([]Supply, error) 
 
 	args := []interface{}{}
 	if keyword != "" {
-		query += " AND (NAME LIKE ? OR ID LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?)"
-		args = append(args, searchPattern, searchPattern, searchPattern, searchPattern)
+		query += " AND (TYPENAME LIKE ? OR ID LIKE ? OR NAME LIKE ? OR IDX2 LIKE ? OR MA_HIEU LIKE ?)"
+		args = append(args, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern)
 	}
 
 	query += " ORDER BY IDX1"
@@ -824,7 +826,7 @@ func (r *SupplyRepository) ReplaceAll(inputs []SupplyUpsertInput) error {
 			input.IDX1,
 			input.ProductID,
 			input.GroupName,
-			input.ID,
+			nullIfEmpty(input.ID),
 			input.IDX2,
 			input.MaHieu,
 			input.TypeName,
@@ -870,11 +872,11 @@ func (r *SupplyRepository) ReplaceAll(inputs []SupplyUpsertInput) error {
 type SupplyMapping struct {
 	IDQuyetdinh     string
 	GroupName       string
-	QuyCachDongGoi    string
-	QuyCachGiaoHang   string
-	QuyCachToiThieu   string
-	TonKhoMin         string
-	TongThau          string
+	QuyCachDongGoi  string
+	QuyCachGiaoHang string
+	QuyCachToiThieu string
+	TonKhoMin       string
+	TongThau        string
 }
 
 // GetSupplyMappings returns a map of all supply mapping configurations from the specified table (mapping or mapping2).
@@ -937,4 +939,3 @@ func cleanMappingKey(key string) string {
 	key = strings.ReplaceAll(key, "đ", "d")
 	return strings.TrimSpace(key)
 }
-

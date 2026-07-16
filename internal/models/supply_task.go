@@ -13,36 +13,39 @@ type SupplyTaskRepository struct {
 }
 
 type SupplyTaskAssignedSupply struct {
-	IDX1 int    `json:"idx1"`
-	Code string `json:"code"`
-	Name string `json:"name"`
+	IDX1         int    `json:"idx1"`
+	Code         string `json:"code"`
+	MaterialCode string `json:"materialCode"`
+	TypeName     string `json:"typeName"`
+	LegacyID     string `json:"legacyId"`
+	Name         string `json:"name"`
 }
 
 type SupplyTaskExportRow struct {
-	IDX1              int
-	ProductID         sql.NullInt32
-	GroupName         sql.NullString
-	ID                sql.NullString
-	IDX2              sql.NullString
-	MaHieu            sql.NullString
-	TypeName          sql.NullString
-	Name              sql.NullString
-	Unit              sql.NullString
-	QuyCachDongGoi    sql.NullString
-	QuyCachGiaoHang   sql.NullString
-	QuyCachToiThieu   sql.NullString
-	ThongTinThau      sql.NullString
-	TongThau          sql.NullString
-	HangSX            sql.NullString
-	NuocSX            sql.NullString
-	NhaCungCap        sql.NullString
-	Price             sql.NullFloat64
-	TonDauKy          sql.NullInt32
-	NhapTrongKy       sql.NullInt32
-	XuatTrongKy       sql.NullInt32
-	TongNhap          sql.NullInt32
-	TonKhoMin         sql.NullInt32
-	AssignedToUserID  sql.NullInt64
+	IDX1             int
+	ProductID        sql.NullInt32
+	GroupName        sql.NullString
+	ID               sql.NullString
+	IDX2             sql.NullString
+	MaHieu           sql.NullString
+	TypeName         sql.NullString
+	Name             sql.NullString
+	Unit             sql.NullString
+	QuyCachDongGoi   sql.NullString
+	QuyCachGiaoHang  sql.NullString
+	QuyCachToiThieu  sql.NullString
+	ThongTinThau     sql.NullString
+	TongThau         sql.NullString
+	HangSX           sql.NullString
+	NuocSX           sql.NullString
+	NhaCungCap       sql.NullString
+	Price            sql.NullFloat64
+	TonDauKy         sql.NullInt32
+	NhapTrongKy      sql.NullInt32
+	XuatTrongKy      sql.NullInt32
+	TongNhap         sql.NullInt32
+	TonKhoMin        sql.NullInt32
+	AssignedToUserID sql.NullInt64
 }
 
 type SupplyTaskImportAssignment struct {
@@ -165,7 +168,11 @@ func (r *SupplyTaskRepository) GetAssignedSupplyIDX1ByUserID(userID int64) ([]in
 
 func (r *SupplyTaskRepository) GetAssignedSupplyDetailsByUserID(userID int64) ([]SupplyTaskAssignedSupply, error) {
 	rows, err := r.DB.Query(`
-		SELECT s.IDX1, COALESCE(s.ID, ''), COALESCE(s.NAME, '')
+		SELECT
+			s.IDX1,
+			COALESCE(s.TYPENAME, ''),
+			COALESCE(s.ID, ''),
+			COALESCE(s.NAME, '')
 		FROM supply_user_assignments sua
 		INNER JOIN supplies s ON s.IDX1 = sua.supply_idx1
 		WHERE sua.user_id = ?
@@ -179,9 +186,11 @@ func (r *SupplyTaskRepository) GetAssignedSupplyDetailsByUserID(userID int64) ([
 	items := make([]SupplyTaskAssignedSupply, 0)
 	for rows.Next() {
 		var item SupplyTaskAssignedSupply
-		if err := rows.Scan(&item.IDX1, &item.Code, &item.Name); err != nil {
+		if err := rows.Scan(&item.IDX1, &item.TypeName, &item.LegacyID, &item.Name); err != nil {
 			return nil, fmt.Errorf("error scanning assigned supply detail: %w", err)
 		}
+		item.Code = PreferredMaterialCode(item.TypeName, item.LegacyID)
+		item.MaterialCode = item.Code
 		items = append(items, item)
 	}
 

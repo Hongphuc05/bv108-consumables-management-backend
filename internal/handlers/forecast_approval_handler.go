@@ -24,7 +24,7 @@ type SaveForecastApprovalRequest struct {
 	ForecastMonth int    `json:"forecastMonth" binding:"required"`
 	ForecastYear  int    `json:"forecastYear" binding:"required"`
 	MaQuanLy      string `json:"maQuanLy"`
-	MaVtytCu      string `json:"maVtytCu" binding:"required"`
+	MaVtytCu      string `json:"maVtytCu"`
 	TenVtytBv     string `json:"tenVtytBv" binding:"required"`
 	Status        string `json:"status" binding:"required"`
 	LyDo          string `json:"lyDo"`
@@ -288,16 +288,16 @@ func buildForecastApprovalInput(req SaveForecastApprovalRequest, currentUser *mo
 		return models.SaveForecastApprovalInput{}, fmt.Errorf("forecast month/year is invalid")
 	}
 
-	maVtytCu := strings.TrimSpace(req.MaVtytCu)
+	maQuanLy, maVtytCu := models.NormalizeMaterialIdentifiers(req.MaQuanLy, req.MaVtytCu)
 	tenVtytBv := strings.TrimSpace(req.TenVtytBv)
-	if maVtytCu == "" || tenVtytBv == "" {
-		return models.SaveForecastApprovalInput{}, fmt.Errorf("maVtytCu and tenVtytBv are required")
+	if maQuanLy == "" || tenVtytBv == "" {
+		return models.SaveForecastApprovalInput{}, fmt.Errorf("maQuanLy (TYPENAME) or maVtytCu (legacy ID), and tenVtytBv are required")
 	}
 
 	return models.SaveForecastApprovalInput{
 		ForecastMonth: req.ForecastMonth,
 		ForecastYear:  req.ForecastYear,
-		MaQuanLy:      strings.TrimSpace(req.MaQuanLy),
+		MaQuanLy:      maQuanLy,
 		MaVtytCu:      maVtytCu,
 		TenVtytBv:     tenVtytBv,
 		Status:        status,
@@ -326,7 +326,7 @@ func (h *ForecastApprovalHandler) getForecastStatusByPeriod(month, year int) (ma
 			statusByItemKey[itemKey] = strings.TrimSpace(record.Status)
 		}
 
-		fallbackKey := strings.TrimSpace(record.MaVtytCu)
+		fallbackKey := strings.ToLower(strings.TrimSpace(record.MaVtytCu))
 		if fallbackKey != "" {
 			statusByItemKey[fallbackKey] = strings.TrimSpace(record.Status)
 		}
@@ -427,7 +427,7 @@ func lookupExistingForecastStatus(req SaveForecastApprovalRequest, statusByItemK
 		}
 	}
 
-	fallbackKey := strings.TrimSpace(req.MaVtytCu)
+	fallbackKey := strings.ToLower(strings.TrimSpace(req.MaVtytCu))
 	if fallbackKey == "" {
 		return ""
 	}
@@ -436,18 +436,7 @@ func lookupExistingForecastStatus(req SaveForecastApprovalRequest, statusByItemK
 }
 
 func forecastApprovalStatusKey(maQuanLy, maVtytCu string) string {
-	normalizedMaQuanLy := strings.TrimSpace(maQuanLy)
-	normalizedMaVtytCu := strings.TrimSpace(maVtytCu)
-
-	if normalizedMaVtytCu != "" && normalizedMaQuanLy != "" {
-		return normalizedMaVtytCu + "::" + normalizedMaQuanLy
-	}
-
-	if normalizedMaVtytCu != "" {
-		return normalizedMaVtytCu
-	}
-
-	return normalizedMaQuanLy
+	return models.MaterialIdentifierKey(maQuanLy, maVtytCu)
 }
 
 // validateForecastMonthNotInPast checks if the given month/year is not in the past

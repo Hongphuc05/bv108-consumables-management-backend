@@ -22,8 +22,6 @@ go.work
 
 # Environment variables
 .env
-.azure-deploy.env
-.azure-deploy.env.example
 
 # IDE
 .vscode/
@@ -37,7 +35,5 @@ go.work
 Thumbs.db
 
 *.md
-DEPLOY_AZURE_FE_BE.md
 __pycache__/
 *.csv
-scripts/deploy_aca_fe_be.sh

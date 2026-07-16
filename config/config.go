@@ -57,7 +57,11 @@ var AppConfig *Config
 func LoadConfig() error {
 	// Load .env file
 	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, using system environment variables")
+		if os.IsNotExist(err) {
+			log.Println("No .env file found, using system environment variables")
+		} else {
+			return fmt.Errorf("failed to load .env: file is unreadable or malformed")
+		}
 	}
 
 	serverPort := getEnv("PORT", getEnv("SERVER_PORT", "8080"))
@@ -93,12 +97,12 @@ func LoadConfig() error {
 		InternalSupplySyncTimezone:      getEnv("INTERNAL_SUPPLY_SYNC_TIMEZONE", "Asia/Bangkok"),
 		InternalSupplySyncRunOnStartup:  getEnvAsBool("INTERNAL_SUPPLY_SYNC_RUN_ON_STARTUP", false),
 		GeminiAPIKey:                    getEnv("GEMINI_API_KEY", ""),
-		GeminiModel:                     getEnv("GEMINI_MODEL", "gemini-2.5-flash-lite"),
+		GeminiModel:                     getEnv("GEMINI_MODEL", "gemini-flash-lite-latest"),
 		GeminiAPIBaseURL:                getEnv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"),
 		GeminiWebSearch:                 getEnvAsBool("GEMINI_WEB_SEARCH", false),
 		GeminiMaxOutputTokens:           getEnvAsInt("GEMINI_MAX_OUTPUT_TOKENS", 4096),
 		SupplyMappingTable:              getEnv("SUPPLY_MAPPING_TABLE", "mapping2"),
-		VinmesAPIBaseURL:                getEnv("VINMES_API_BASE_URL", "http://108.108.108.251/api/v1/resource"),
+		VinmesAPIBaseURL:                getEnv("VINMES_API_BASE_URL", ""),
 		VinmesAPIToken:                  getEnv("VINMES_API_TOKEN", ""),
 		VinmesAPITimeoutSeconds:         getEnvAsInt("VINMES_API_TIMEOUT_SECONDS", 60),
 	}
@@ -109,9 +113,6 @@ func LoadConfig() error {
 // GetDSN returns the MySQL Data Source Name
 func (c *Config) GetDSN() string {
 	tlsMode := c.DBTLS
-	if tlsMode == "" && strings.Contains(c.DBHost, ".mysql.database.azure.com") {
-		tlsMode = "true"
-	}
 
 	baseDSN := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 		c.DBUser,

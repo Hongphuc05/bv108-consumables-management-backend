@@ -157,13 +157,14 @@ func (r *InvoiceReconciliationRepository) ListVinmesExportSources(filter VinmesE
 	materialCode := strings.ToLower(strings.TrimSpace(filter.MaterialCode))
 	if materialCode != "" {
 		queryBuilder.WriteString(`
-		  AND (
-			LOWER(TRIM(COALESCE(r.invoice_item_code, ''))) = ?
-			OR LOWER(TRIM(COALESCE(h_row.ma_hang_hoa, ''))) = ?
-			OR LOWER(TRIM(COALESCE(r.ma_vtyt_cu, ''))) = ?
-		  )
-		`)
-		args = append(args, materialCode, materialCode, materialCode)
+			  AND (
+				LOWER(TRIM(COALESCE(r.invoice_item_code, ''))) = ?
+				OR LOWER(TRIM(COALESCE(h_row.ma_hang_hoa, ''))) = ?
+				OR LOWER(TRIM(COALESCE(r.ma_quan_ly, ''))) = ?
+				OR LOWER(TRIM(COALESCE(r.ma_vtyt_cu, ''))) = ?
+			  )
+			`)
+		args = append(args, materialCode, materialCode, materialCode, materialCode)
 	}
 
 	queryBuilder.WriteString(`

@@ -151,14 +151,15 @@ func (h *OrderHandler) UpsertInvoiceReconciliations(c *gin.Context) {
 
 		orderTime, _ := parseOptionalRFC3339(item.OrderTime)
 		invoiceTime, _ := parseOptionalRFC3339(item.InvoiceTime)
+		maQuanLy, maVtytCu := models.NormalizeMaterialIdentifiers(item.MaQuanLy, item.MaVtytCu)
 
 		inputs = append(inputs, models.UpsertInvoiceReconciliationInput{
 			OrderHistoryID:          item.OrderHistoryID,
 			OrderBatchKey:           strings.TrimSpace(item.OrderBatchKey),
 			CompanyContactID:        trimOptionalStringPointer(item.CompanyContactID),
 			NhaThau:                 strings.TrimSpace(item.NhaThau),
-			MaQuanLy:                strings.TrimSpace(item.MaQuanLy),
-			MaVtytCu:                strings.TrimSpace(item.MaVtytCu),
+			MaQuanLy:                maQuanLy,
+			MaVtytCu:                maVtytCu,
 			TenVtytBv:               strings.TrimSpace(item.TenVtytBv),
 			OrderedQty:              item.OrderedQty,
 			OrderTime:               orderTime,
@@ -537,6 +538,15 @@ func (h *OrderHandler) CreateForecastOrders(c *gin.Context) {
 			continue
 		}
 
+		maQuanLy, maVtytCu := models.NormalizeMaterialIdentifiers(item.MaQuanLy, item.MaVtytCu)
+		if maQuanLy == "" {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Error:   "INVALID_REQUEST",
+				Message: "Each order item requires maQuanLy (TYPENAME) or maVtytCu (legacy ID)",
+			})
+			return
+		}
+
 		companyContactID, resolvedEmail, err := h.resolveForecastOrderContact(item)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "DATABASE_ERROR", Message: err.Error()})
@@ -548,8 +558,8 @@ func (h *OrderHandler) CreateForecastOrders(c *gin.Context) {
 		inputs = append(inputs, models.CreatePendingOrderInput{
 			CompanyContactID: companyContactID,
 			NhaThau:          sanitizeText(item.NhaThau),
-			MaQuanLy:         sanitizeText(item.MaQuanLy),
-			MaVtytCu:         sanitizeText(item.MaVtytCu),
+			MaQuanLy:         maQuanLy,
+			MaVtytCu:         maVtytCu,
 			TenVtytBv:        sanitizeText(item.TenVtytBv),
 			MaHieu:           sanitizeText(item.MaHieu),
 			HangSx:           sanitizeText(item.HangSx),
@@ -695,8 +705,9 @@ func (h *OrderHandler) CreateManualOrder(c *gin.Context) {
 		return
 	}
 
-	if sanitizeText(req.NhaThau) == "" || sanitizeText(req.MaVtytCu) == "" || sanitizeText(req.TenVtytBv) == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "nhaThau, maVtytCu, tenVtytBv are required"})
+	maQuanLy, maVtytCu := models.NormalizeMaterialIdentifiers(req.MaQuanLy, req.MaVtytCu)
+	if sanitizeText(req.NhaThau) == "" || maQuanLy == "" || sanitizeText(req.TenVtytBv) == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "INVALID_REQUEST", Message: "nhaThau, maQuanLy (TYPENAME) or maVtytCu (legacy ID), and tenVtytBv are required"})
 		return
 	}
 
@@ -713,8 +724,8 @@ func (h *OrderHandler) CreateManualOrder(c *gin.Context) {
 	input := models.CreatePendingOrderInput{
 		CompanyContactID: companyContactID,
 		NhaThau:          sanitizeText(req.NhaThau),
-		MaQuanLy:         sanitizeText(req.MaQuanLy),
-		MaVtytCu:         sanitizeText(req.MaVtytCu),
+		MaQuanLy:         maQuanLy,
+		MaVtytCu:         maVtytCu,
 		TenVtytBv:        sanitizeText(req.TenVtytBv),
 		MaHieu:           sanitizeText(req.MaHieu),
 		HangSx:           sanitizeText(req.HangSx),
@@ -1041,7 +1052,7 @@ func (h *OrderHandler) sendPlacedOrderEmails(orders []models.PendingOrder) error
 		group.items = append(group.items, services.OrderEmailItem{
 			Index:        len(group.items) + 1,
 			TenVatTu:     strings.TrimSpace(order.TenVtytBv),
-			MaXuatHoaDon: strings.TrimSpace(order.MaVtytCu),
+			MaXuatHoaDon: models.PreferredMaterialCode(order.MaQuanLy, order.MaVtytCu),
 			MaHieu:       strings.TrimSpace(order.MaHieu),
 			HangNuocSX:   strings.TrimSpace(order.HangSx),
 			DonViTinh:    strings.TrimSpace(order.DonViTinh),

@@ -261,7 +261,6 @@ func (s *VinmesCatalogService) refreshCatalogs(ctx context.Context) (*VinmesCata
 }
 
 func (s *VinmesCatalogService) loadRemoteCatalogs(ctx context.Context) (*vinmesCatalogs, error) {
-
 	catalogs := &vinmesCatalogs{}
 	tasks := []struct {
 		resource string
@@ -294,8 +293,35 @@ func (s *VinmesCatalogService) loadRemoteCatalogs(ctx context.Context) (*vinmesC
 	if err := <-errCh; err != nil {
 		return nil, err
 	}
+	if err := validateRequiredVinmesCatalogs(catalogs); err != nil {
+		return nil, err
+	}
 
 	return catalogs, nil
+}
+
+func validateRequiredVinmesCatalogs(catalogs *vinmesCatalogs) error {
+	if catalogs == nil {
+		return fmt.Errorf("Vinmes catalog response is empty")
+	}
+
+	required := []struct {
+		resource string
+		count    int
+	}{
+		{resource: "storage_select_for_po", count: len(catalogs.Storages)},
+		{resource: "partner_select_for_po", count: len(catalogs.Partners)},
+		{resource: "resource_select_for_po", count: len(catalogs.Resources)},
+		{resource: "tax_select_for_po", count: len(catalogs.Taxes)},
+		{resource: "contractpkg_select_for_po", count: len(catalogs.ContractPackages)},
+		{resource: "product_select_for_po", count: len(catalogs.Products)},
+	}
+	for _, catalog := range required {
+		if catalog.count == 0 {
+			return fmt.Errorf("Vinmes %s returned an empty required catalog", catalog.resource)
+		}
+	}
+	return nil
 }
 
 func (s *VinmesCatalogService) fetchCatalog(ctx context.Context, resource string, target any, payloads *[]json.RawMessage) error {
@@ -669,12 +695,12 @@ func mapContractPackage(master models.VinmesExportMaster, catalogs *vinmesCatalo
 		}
 	}
 	if len(matches) == 1 {
-		packageID, err := strconv.ParseInt(tenderCode, 10, 64)
+		packageID, err := strconv.ParseInt(strings.TrimSpace(matches[0].ID), 10, 64)
 		if err == nil {
 			mapped.Master.Binds.ContractPackageID = int64Pointer(packageID)
 			return
 		}
-		mapped.addError("p_contractpkg_id", master.GoiThau, "Mã gói thầu Vinmes không phải dạng số C10 yêu cầu")
+		mapped.addError("p_contractpkg_id", master.GoiThau, "ID gói thầu Vinmes không phải dạng số C10 yêu cầu; không tự suy đoán ID từ số quyết định")
 		return
 	}
 	message := "Không tìm thấy gói thầu trong danh mục Vinmes"
