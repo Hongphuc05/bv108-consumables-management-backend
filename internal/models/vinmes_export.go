@@ -18,7 +18,7 @@ const (
 	defaultVinmesGoiThau   = "không thấy"
 )
 
-var tenderCodePattern = regexp.MustCompile(`\b(9528|9530|9532|9534)\b`)
+var tenderCodePattern = regexp.MustCompile(`\b(2233|4418|7313|9528|9530|9532|9534)\b`)
 
 type VinmesExportFilter struct {
 	Month        int

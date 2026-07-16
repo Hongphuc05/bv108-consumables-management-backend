@@ -28,6 +28,7 @@ func TestRouterRegistersExpectedRoutes(t *testing.T) {
 		"GET /api/ws",
 		"GET /api/export-to-vinmes",
 		"GET /api/export-to-vinmes/mapping-preview",
+		"POST /api/export-to-vinmes/catalogs/refresh",
 		"POST /api/auth/register",
 		"POST /api/auth/login",
 		"GET /api/auth/profile",

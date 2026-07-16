@@ -36,6 +36,7 @@ func main() {
 	supplyTaskRepo := models.NewSupplyTaskRepository(database.DB)
 	orderRepo := models.NewOrderRepository(database.DB)
 	invoiceMatchRepo := models.NewInvoiceReconciliationRepository(database.DB)
+	vinmesCatalogRepo := models.NewVinmesCatalogRepository(database.DB)
 	orderUnreadRepo := models.NewOrderUnreadRepository(database.DB)
 	companyContactRepo := models.NewCompanyContactRepository(database.DB)
 	forecastApprovalRepo := models.NewForecastApprovalRepository(database.DB)
@@ -48,6 +49,7 @@ func main() {
 		startupStep{name: "order unread schema", run: orderUnreadRepo.EnsureSchema},
 		startupStep{name: "forecast approval schema", run: forecastApprovalRepo.EnsureSchema},
 		startupStep{name: "supply task schema", run: supplyTaskRepo.EnsureSchema},
+		startupStep{name: "Vinmes catalog schema", run: vinmesCatalogRepo.EnsureSchema},
 	)
 	mustRunStartupStep("invoice export schema", schemaMaintenanceRepo.EnsureInvoiceExportSchema)
 	mustRunStartupStep("company contacts schema", companyContactRepo.EnsureSchema)
@@ -74,6 +76,7 @@ func main() {
 		APIBaseURL:     config.AppConfig.VinmesAPIBaseURL,
 		APIToken:       config.AppConfig.VinmesAPIToken,
 		TimeoutSeconds: config.AppConfig.VinmesAPITimeoutSeconds,
+		CatalogStore:   vinmesCatalogRepo,
 	})
 
 	router := newRouter(config.AppConfig.FrontendURL, apiHandlers{

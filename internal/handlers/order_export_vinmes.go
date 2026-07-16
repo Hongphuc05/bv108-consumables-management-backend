@@ -84,6 +84,29 @@ func (h *OrderHandler) GetExportToVinmesMappingPreview(c *gin.Context) {
 	})
 }
 
+func (h *OrderHandler) RefreshVinmesCatalogs(c *gin.Context) {
+	currentUser, err := h.getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "UNAUTHORIZED", Message: err.Error()})
+		return
+	}
+	if !userHasAnyRole(currentUser, RoleAdmin, RoleChiHuyKhoa, RoleNhanVienKeToan) {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "FORBIDDEN", Message: "Only Admin, Chi huy khoa or Nhan vien ke toan can refresh Vinmes catalogs"})
+		return
+	}
+	if h.vinmesCatalog == nil || !h.vinmesCatalog.IsConfigured() {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "VINMES_NOT_CONFIGURED", Message: "VINMES_API_BASE_URL is not configured"})
+		return
+	}
+
+	result, err := h.vinmesCatalog.RefreshCatalogs(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusBadGateway, ErrorResponse{Error: "VINMES_API_ERROR", Message: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 func (h *OrderHandler) authorizeVinmesExport(c *gin.Context) bool {
 	currentUser, err := h.getCurrentUser(c)
 	if err != nil {

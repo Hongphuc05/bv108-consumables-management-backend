@@ -21,25 +21,27 @@ import (
 
 const (
 	defaultVinmesCatalogTimeout = 60 * time.Second
-	vinmesCatalogCacheTTL       = 5 * time.Minute
 )
 
-var vinmesTenderCodePattern = regexp.MustCompile(`\b(9528|9530|9532|9534)\b`)
+var vinmesTenderCodePattern = regexp.MustCompile(`\b(2233|4418|7313|9528|9530|9532|9534)\b`)
 
 type VinmesCatalogConfig struct {
 	APIBaseURL     string
 	APIToken       string
 	TimeoutSeconds int
+	CatalogStore   VinmesCatalogStore
+}
+
+type VinmesCatalogStore interface {
+	ReplaceAll(items []models.VinmesCatalogItem, syncedAt time.Time) error
+	ListAll() ([]models.VinmesCatalogItem, error)
 }
 
 type VinmesCatalogService struct {
-	apiBaseURL string
-	apiToken   string
-	httpClient *http.Client
-
-	cacheMu        sync.Mutex
-	cachedCatalogs *vinmesCatalogs
-	cacheExpiresAt time.Time
+	apiBaseURL   string
+	apiToken     string
+	httpClient   *http.Client
+	catalogStore VinmesCatalogStore
 }
 
 type vinmesStorage struct {
@@ -75,13 +77,49 @@ type vinmesProduct struct {
 	Name string `json:"name"`
 }
 
+type vinmesStringID string
+
+func (id *vinmesStringID) UnmarshalJSON(data []byte) error {
+	var stringValue string
+	if err := json.Unmarshal(data, &stringValue); err == nil {
+		*id = vinmesStringID(stringValue)
+		return nil
+	}
+
+	var numberValue json.Number
+	if err := json.Unmarshal(data, &numberValue); err != nil {
+		return fmt.Errorf("expected string or number ID: %w", err)
+	}
+	*id = vinmesStringID(numberValue.String())
+	return nil
+}
+
+type vinmesContract struct {
+	ID vinmesStringID `json:"adc_contract_id"`
+	No string         `json:"adc_contract_no"`
+}
+
 type vinmesCatalogs struct {
 	Storages         []vinmesStorage
+	StoragePayloads  []json.RawMessage
 	Partners         []vinmesPartner
+	PartnerPayloads  []json.RawMessage
 	Resources        []vinmesResource
+	ResourcePayloads []json.RawMessage
 	Taxes            []vinmesTax
+	TaxPayloads      []json.RawMessage
 	ContractPackages []vinmesContractPackage
+	PackagePayloads  []json.RawMessage
 	Products         []vinmesProduct
+	ProductPayloads  []json.RawMessage
+	Contracts        []vinmesContract
+	ContractPayloads []json.RawMessage
+}
+
+type VinmesCatalogRefreshResult struct {
+	Total    int            `json:"total"`
+	Counts   map[string]int `json:"counts"`
+	SyncedAt time.Time      `json:"syncedAt"`
 }
 
 type VinmesC10Options struct {
@@ -97,7 +135,7 @@ type VinmesC10MasterBinds struct {
 	TaxID             *int64  `json:"p_tax_id"`
 	KyHieu            string  `json:"p_kyhieu"`
 	InvoiceNo         string  `json:"p_invoiceno"`
-	ContractPackageID *string `json:"p_contractpkg_id"`
+	ContractPackageID *int64  `json:"p_contractpkg_id"`
 	ContractID        *string `json:"p_contract_id"`
 	OrderDate         string  `json:"p_orderdate"`
 	InvoiceDate       string  `json:"p_invoicedate"`
@@ -153,9 +191,10 @@ func NewVinmesCatalogService(cfg VinmesCatalogConfig) *VinmesCatalogService {
 	}
 
 	return &VinmesCatalogService{
-		apiBaseURL: strings.TrimRight(strings.TrimSpace(cfg.APIBaseURL), "/"),
-		apiToken:   strings.TrimSpace(cfg.APIToken),
-		httpClient: &http.Client{Timeout: timeout},
+		apiBaseURL:   strings.TrimRight(strings.TrimSpace(cfg.APIBaseURL), "/"),
+		apiToken:     strings.TrimSpace(cfg.APIToken),
+		httpClient:   &http.Client{Timeout: timeout},
+		catalogStore: cfg.CatalogStore,
 	}
 }
 
@@ -181,24 +220,61 @@ func (s *VinmesCatalogService) BuildMappingPreview(ctx context.Context, masters 
 }
 
 func (s *VinmesCatalogService) loadCatalogs(ctx context.Context) (*vinmesCatalogs, error) {
-	s.cacheMu.Lock()
-	defer s.cacheMu.Unlock()
-
-	if s.cachedCatalogs != nil && time.Now().Before(s.cacheExpiresAt) {
-		return s.cachedCatalogs, nil
+	if s.catalogStore != nil {
+		items, err := s.catalogStore.ListAll()
+		if err != nil {
+			return nil, err
+		}
+		if len(items) > 0 {
+			return catalogsFromStoredItems(items)
+		}
+		_, catalogs, err := s.refreshCatalogs(ctx)
+		return catalogs, err
 	}
+	return s.loadRemoteCatalogs(ctx)
+}
+
+func (s *VinmesCatalogService) RefreshCatalogs(ctx context.Context) (*VinmesCatalogRefreshResult, error) {
+	if !s.IsConfigured() {
+		return nil, fmt.Errorf("Vinmes catalog API is not configured")
+	}
+	result, _, err := s.refreshCatalogs(ctx)
+	return result, err
+}
+
+func (s *VinmesCatalogService) refreshCatalogs(ctx context.Context) (*VinmesCatalogRefreshResult, *vinmesCatalogs, error) {
+	catalogs, err := s.loadRemoteCatalogs(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	syncedAt := time.Now()
+	items, counts, err := storedItemsFromCatalogs(catalogs, syncedAt)
+	if err != nil {
+		return nil, nil, err
+	}
+	if s.catalogStore != nil {
+		if err := s.catalogStore.ReplaceAll(items, syncedAt); err != nil {
+			return nil, nil, err
+		}
+	}
+	return &VinmesCatalogRefreshResult{Total: len(items), Counts: counts, SyncedAt: syncedAt}, catalogs, nil
+}
+
+func (s *VinmesCatalogService) loadRemoteCatalogs(ctx context.Context) (*vinmesCatalogs, error) {
 
 	catalogs := &vinmesCatalogs{}
 	tasks := []struct {
 		resource string
 		target   any
+		payloads *[]json.RawMessage
 	}{
-		{resource: "storage_select_for_po", target: &catalogs.Storages},
-		{resource: "partner_select_for_po", target: &catalogs.Partners},
-		{resource: "resource_select_for_po", target: &catalogs.Resources},
-		{resource: "tax_select_for_po", target: &catalogs.Taxes},
-		{resource: "contractpkg_select_for_po", target: &catalogs.ContractPackages},
-		{resource: "product_select_for_po", target: &catalogs.Products},
+		{resource: "storage_select_for_po", target: &catalogs.Storages, payloads: &catalogs.StoragePayloads},
+		{resource: "partner_select_for_po", target: &catalogs.Partners, payloads: &catalogs.PartnerPayloads},
+		{resource: "resource_select_for_po", target: &catalogs.Resources, payloads: &catalogs.ResourcePayloads},
+		{resource: "tax_select_for_po", target: &catalogs.Taxes, payloads: &catalogs.TaxPayloads},
+		{resource: "contractpkg_select_for_po", target: &catalogs.ContractPackages, payloads: &catalogs.PackagePayloads},
+		{resource: "product_select_for_po", target: &catalogs.Products, payloads: &catalogs.ProductPayloads},
+		{resource: "contract_select_for_po", target: &catalogs.Contracts, payloads: &catalogs.ContractPayloads},
 	}
 
 	var wg sync.WaitGroup
@@ -208,7 +284,7 @@ func (s *VinmesCatalogService) loadCatalogs(ctx context.Context) (*vinmesCatalog
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := s.fetchCatalog(ctx, task.resource, task.target); err != nil {
+			if err := s.fetchCatalog(ctx, task.resource, task.target, task.payloads); err != nil {
 				errCh <- err
 			}
 		}()
@@ -219,12 +295,10 @@ func (s *VinmesCatalogService) loadCatalogs(ctx context.Context) (*vinmesCatalog
 		return nil, err
 	}
 
-	s.cachedCatalogs = catalogs
-	s.cacheExpiresAt = time.Now().Add(vinmesCatalogCacheTTL)
 	return catalogs, nil
 }
 
-func (s *VinmesCatalogService) fetchCatalog(ctx context.Context, resource string, target any) error {
+func (s *VinmesCatalogService) fetchCatalog(ctx context.Context, resource string, target any, payloads *[]json.RawMessage) error {
 	endpoint := fmt.Sprintf("%s/%s?method=select", s.apiBaseURL, url.PathEscape(resource))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, http.NoBody)
 	if err != nil {
@@ -258,7 +332,131 @@ func (s *VinmesCatalogService) fetchCatalog(ctx context.Context, resource string
 	if err := json.Unmarshal(envelope.Data, target); err != nil {
 		return fmt.Errorf("decode Vinmes %s catalog: %w", resource, err)
 	}
+	if err := json.Unmarshal(envelope.Data, payloads); err != nil {
+		return fmt.Errorf("preserve Vinmes %s catalog payloads: %w", resource, err)
+	}
 	return nil
+}
+
+func storedItemsFromCatalogs(catalogs *vinmesCatalogs, syncedAt time.Time) ([]models.VinmesCatalogItem, map[string]int, error) {
+	items := make([]models.VinmesCatalogItem, 0,
+		len(catalogs.Storages)+len(catalogs.Partners)+len(catalogs.Resources)+
+			len(catalogs.Taxes)+len(catalogs.ContractPackages)+len(catalogs.Contracts)+len(catalogs.Products),
+	)
+	counts := make(map[string]int)
+
+	appendItem := func(catalogType, externalID, code, name, taxCode, bankAccount string, taxRate *float64, raw json.RawMessage, value any) error {
+		if len(raw) == 0 {
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				return fmt.Errorf("encode Vinmes %s item %s: %w", catalogType, externalID, err)
+			}
+			raw = encoded
+		}
+		items = append(items, models.VinmesCatalogItem{
+			CatalogType: catalogType,
+			ExternalID:  externalID,
+			Code:        code,
+			Name:        name,
+			TaxCode:     taxCode,
+			BankAccount: bankAccount,
+			TaxRate:     taxRate,
+			RawPayload:  string(raw),
+			SyncedAt:    syncedAt,
+		})
+		counts[catalogType]++
+		return nil
+	}
+
+	for index, item := range catalogs.Storages {
+		if err := appendItem("storage", strconv.FormatInt(item.ID, 10), "", item.Name, "", "", nil, payloadAt(catalogs.StoragePayloads, index), item); err != nil {
+			return nil, nil, err
+		}
+	}
+	for index, item := range catalogs.Partners {
+		taxCode := ""
+		if item.TaxCode != nil {
+			taxCode = strings.TrimSpace(*item.TaxCode)
+		}
+		bankAccount := ""
+		if item.BankAccount != nil {
+			bankAccount = strings.TrimSpace(*item.BankAccount)
+		}
+		if err := appendItem("partner", item.ID, "", item.Name, taxCode, bankAccount, nil, payloadAt(catalogs.PartnerPayloads, index), item); err != nil {
+			return nil, nil, err
+		}
+	}
+	for index, item := range catalogs.Resources {
+		if err := appendItem("resource", strconv.FormatInt(item.ID, 10), "", item.Name, "", "", nil, payloadAt(catalogs.ResourcePayloads, index), item); err != nil {
+			return nil, nil, err
+		}
+	}
+	for index, item := range catalogs.Taxes {
+		rate := item.Rate
+		if err := appendItem("tax", strconv.FormatInt(item.ID, 10), strconv.FormatFloat(item.Rate, 'f', -1, 64), "", "", "", &rate, payloadAt(catalogs.TaxPayloads, index), item); err != nil {
+			return nil, nil, err
+		}
+	}
+	for index, item := range catalogs.ContractPackages {
+		if err := appendItem("contract_package", item.ID, item.ID, item.Description, "", "", nil, payloadAt(catalogs.PackagePayloads, index), item); err != nil {
+			return nil, nil, err
+		}
+	}
+	for index, item := range catalogs.Contracts {
+		if err := appendItem("contract", string(item.ID), item.No, item.No, "", "", nil, payloadAt(catalogs.ContractPayloads, index), item); err != nil {
+			return nil, nil, err
+		}
+	}
+	for index, item := range catalogs.Products {
+		if err := appendItem("product", strconv.FormatInt(item.ID, 10), item.Code, item.Name, "", "", nil, payloadAt(catalogs.ProductPayloads, index), item); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return items, counts, nil
+}
+
+func payloadAt(payloads []json.RawMessage, index int) json.RawMessage {
+	if index < 0 || index >= len(payloads) {
+		return nil
+	}
+	return payloads[index]
+}
+
+func catalogsFromStoredItems(items []models.VinmesCatalogItem) (*vinmesCatalogs, error) {
+	catalogs := &vinmesCatalogs{}
+	for _, item := range items {
+		var target any
+		switch item.CatalogType {
+		case "storage":
+			catalogs.Storages = append(catalogs.Storages, vinmesStorage{})
+			target = &catalogs.Storages[len(catalogs.Storages)-1]
+		case "partner":
+			catalogs.Partners = append(catalogs.Partners, vinmesPartner{})
+			target = &catalogs.Partners[len(catalogs.Partners)-1]
+		case "resource":
+			catalogs.Resources = append(catalogs.Resources, vinmesResource{})
+			target = &catalogs.Resources[len(catalogs.Resources)-1]
+		case "tax":
+			catalogs.Taxes = append(catalogs.Taxes, vinmesTax{})
+			target = &catalogs.Taxes[len(catalogs.Taxes)-1]
+		case "contract_package":
+			catalogs.ContractPackages = append(catalogs.ContractPackages, vinmesContractPackage{})
+			target = &catalogs.ContractPackages[len(catalogs.ContractPackages)-1]
+		case "contract":
+			catalogs.Contracts = append(catalogs.Contracts, vinmesContract{})
+			target = &catalogs.Contracts[len(catalogs.Contracts)-1]
+		case "product":
+			catalogs.Products = append(catalogs.Products, vinmesProduct{})
+			target = &catalogs.Products[len(catalogs.Products)-1]
+		default:
+			continue
+		}
+		if err := json.Unmarshal([]byte(item.RawPayload), target); err != nil {
+			return nil, fmt.Errorf("decode stored Vinmes %s item %s: %w", item.CatalogType, item.ExternalID, err)
+		}
+	}
+	return catalogs, nil
 }
 
 func bearerAuthorization(token string) string {
@@ -471,7 +669,12 @@ func mapContractPackage(master models.VinmesExportMaster, catalogs *vinmesCatalo
 		}
 	}
 	if len(matches) == 1 {
-		mapped.Master.Binds.ContractPackageID = stringPointer(matches[0].ID)
+		packageID, err := strconv.ParseInt(tenderCode, 10, 64)
+		if err == nil {
+			mapped.Master.Binds.ContractPackageID = int64Pointer(packageID)
+			return
+		}
+		mapped.addError("p_contractpkg_id", master.GoiThau, "Mã gói thầu Vinmes không phải dạng số C10 yêu cầu")
 		return
 	}
 	message := "Không tìm thấy gói thầu trong danh mục Vinmes"

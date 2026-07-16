@@ -43,6 +43,7 @@ func registerAPIRoutes(api *gin.RouterGroup, h apiHandlers) {
 	api.GET("/ws", h.websocket.Handle)
 	api.GET("/export-to-vinmes", h.orders.GetExportToVinmes)
 	api.GET("/export-to-vinmes/mapping-preview", h.orders.GetExportToVinmesMappingPreview)
+	api.POST("/export-to-vinmes/catalogs/refresh", h.orders.RefreshVinmesCatalogs)
 
 	registerAuthRoutes(api.Group("/auth"), h.auth)
 	registerSupplyRoutes(api.Group("/supplies"), h.supplies, h.internalSupplySync)

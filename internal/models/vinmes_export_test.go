@@ -38,6 +38,21 @@ func TestExtractTenderReference(t *testing.T) {
 			input:    "[B001142.1] Nẹp 2.0mm, thẳng, dày 1mm Hãng sản xuất: AGOMED | Nước sản xuất: Đức | (Theo HĐ số 1864 Ngày 31/12/2025 và QĐ số 9530)",
 			expected: "9530/QĐ-BV",
 		},
+		{
+			name:     "Vinmes contract package 4418",
+			input:    "Theo HĐ số DMEC-DEMO và QĐ số 4418",
+			expected: "4418/QĐ-BV",
+		},
+		{
+			name:     "Vinmes contract package 2233",
+			input:    "Theo HĐ số DMEC-DEMO và QĐ số 2233",
+			expected: "2233/QĐ-BV",
+		},
+		{
+			name:     "Vinmes contract package 7313",
+			input:    "Theo HĐ số DMEC-DEMO và QĐ số 7313/QĐ-BV;G1;N1;2023",
+			expected: "7313/QĐ-BV",
+		},
 	}
 
 	for _, tc := range cases {
